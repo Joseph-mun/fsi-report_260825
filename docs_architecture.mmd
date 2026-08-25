@@ -1,0 +1,25 @@
+graph TD
+    START --> triage
+    triage -- CE1: payload --> payload_analyst
+    triage -- CE1: log --> log_analyst
+    triage -- CE1: knowledge --> atlas_rag
+    triage -- CE1: intel --> threat_intel
+    triage -- CE1: plot --> visualizer
+    triage -- CE1: plain --> plain_answer
+    payload_analyst -- CE2: 위험≥70 --> atlas_rag
+    payload_analyst -- CE2: 40~69 --> threat_intel
+    payload_analyst -- CE2: <40 --> playbook_writer
+    log_analyst -- CE3: 실행실패 재시도(≤2) --> log_analyst
+    log_analyst -- CE3: 재시도 소진 --> plain_answer
+    log_analyst -- CE3: 성공 --> playbook_writer
+    atlas_rag --> grade_docs
+    grade_docs -- CE4: 충분 --> playbook_writer
+    grade_docs -- CE4: 불충분 → 웹 폴백 --> threat_intel
+    threat_intel -- CE5: CVE 발견 --> cve_lookup
+    threat_intel -- CE5: CVE 없음 --> playbook_writer
+    cve_lookup --> playbook_writer
+    visualizer --> playbook_writer
+    playbook_writer --> verifier
+    verifier -- CE6: 검증실패 재작성(≤1) --> playbook_writer
+    verifier -- CE6: 통과 --> END
+    plain_answer --> END

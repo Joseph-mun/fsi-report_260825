@@ -1,0 +1,31 @@
+# PromptShield — Streamlit Community Cloud 배포용 (Python 3.13 기준)
+# 로컬 개발 환경에서 실제로 동작을 검증한 버전을 고정했습니다.
+
+streamlit==1.56.0
+
+# LangChain / LangGraph
+langgraph==1.2.11
+langchain-core==1.5.6
+langchain-openai==1.1.12
+langchain-community==0.4.1
+langchain-classic==1.0.8
+langchain-text-splitters==1.1.2
+
+# 벡터 검색 / 문서 로딩
+faiss-cpu==1.13.2
+pypdf==6.16.1
+
+# 데이터 처리 / 시각화
+pandas==3.0.5
+numpy==2.5.2
+matplotlib==3.11.1
+
+# 웹 API (Tavily 검색, NVD CVE 조회)
+requests==2.34.2
+
+# 환경 변수
+python-dotenv==1.2.2
+
+# prepare_data.py 전용 (배포 시에는 쓰지 않지만 재현을 위해 포함)
+pyarrow==25.0.1
+PyYAML==6.0.3

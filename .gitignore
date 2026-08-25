@@ -1,0 +1,23 @@
+# --- 비밀 정보 (절대 커밋 금지) ---
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# --- 실행 산출물 ---
+plot.png
+
+# --- OS ---
+.DS_Store
+
+# --- 도구 상태 ---
+.omc/
+.openchrome/
+.claude/

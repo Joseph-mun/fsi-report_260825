@@ -203,12 +203,22 @@ LANGSMITH_ENDPOINT = "https://api.smith.langchain.com"
 ## 10. 검증
 
 ```bash
-python -m tests.test_routes    # 분기 함수 22건
-python -m tests.test_graph     # 그래프 구조 4건 (노드 수·조건부 엣지 수)
-python -m tests.test_sandbox   # 코드 실행 샌드박스 91건
+python -m tests.test_routes           # 분기 함수 22건
+python -m tests.test_graph            # 그래프 구조 4건 (노드 수·조건부 엣지 수)
+python -m tests.test_sandbox          # 코드 실행 샌드박스 91건
+python -m tests.test_allowlist_audit  # 허용 목록 전수 감사 (221개 속성)
 ```
 
-**총 117건 전부 통과.** 그 밖에 구현 중 확인한 사항:
+`test_allowlist_audit` 은 허용한 속성을 **하나씩 실제로 호출해 보며** 두 가지를 찾습니다.
+
+- 파일·경로 인자를 받는 메서드 (`to_string(buf=...)` 부류)
+- 문자열을 메서드 이름으로 해석하는 메서드 (`agg('to_csv', ...)` 부류)
+
+이 앱이 반복적으로 뚫렸던 두 부류입니다. 허용 목록에 이름을 추가할 때
+이 테스트를 돌리면 그 이름이 위험한지 자동으로 알려 줍니다.
+현재 221개 속성 중 해당 없음.
+
+**총 117건 + 전수 감사 통과.** 그 밖에 구현 중 확인한 사항:
 
 - 6개 라우팅 경로를 실제 LLM 호출로 종단 확인
 - CE3 자기치유 루프 — 잘못된 열 이름으로 실패시킨 뒤 재시도가 오류를 읽고 코드를 고쳐 복구하는 것을 확인

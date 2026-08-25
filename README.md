@@ -125,11 +125,21 @@ streamlit run main.py
 | Python version | `3.13` |
 | Secrets | `OPENAI_API_KEY`, `TAVILY_API_KEY` |
 
-> Community Cloud 무료 플랜은 워크스페이스당 private 앱을 1개만 허용하고, private 앱은 초대된 이메일만 접속할 수 있습니다. 평가자가 URL 로 바로 열 수 있어야 하므로 **public 앱으로 배포**했고, 그에 맞춰 9절의 코드 실행 샌드박스를 넣었습니다.
+> Community Cloud 무료 플랜은 워크스페이스당 private 앱을 1개만 허용하고, private 앱은 초대된 이메일만 접속할 수 있습니다. 평가자가 URL 로 바로 열 수 있어야 하므로 **public 앱으로 배포**했고, 그에 맞춰 11절의 코드 실행 샌드박스를 넣었습니다.
 
 FAISS 인덱스를 미리 커밋해 두었으므로 배포 시 재임베딩이 발생하지 않습니다.
 
-## 6. 사용 예시
+## 6. 화면 구성
+
+| 영역 | 내용 |
+| --- | --- |
+| **왼쪽 사이드바** | 게이트웨이 현황(요청 수·공격 비율·차단률·미탐) · 데이터/지식베이스 구성 · **실행 경로 라이브 그래프** · 환경 설정 |
+| **본문** | 질문 예시 버튼 6개와 대화창만 배치해 시연에 집중 |
+
+질문 예시는 버튼으로 만들어 클릭 한 번에 실행됩니다. 각 버튼이 서로 다른 라우팅 경로를
+타므로, 6개를 차례로 누르면 조건부 엣지가 모두 발화하는 것을 사이드바 그래프에서 볼 수 있습니다.
+
+## 7. 사용 예시
 
 | 유형 | 질문 | 실행 경로 |
 | --- | --- | --- |
@@ -140,7 +150,7 @@ FAISS 인덱스를 미리 커밋해 두었으므로 배포 시 재임베딩이 �
 | 시각화 | `테넌트별 차단 건수를 막대그래프로 그려줘` | triage → visualizer → playbook_writer → verifier |
 | 일반 | `오늘 점심 뭐 먹을까?` | triage → plain_answer |
 
-## 7. 파일 구성
+## 8. 파일 구성
 
 ```
 .
@@ -161,7 +171,35 @@ FAISS 인덱스를 미리 커밋해 두었으므로 배포 시 재임베딩이 �
 └── 6조_문요셉.png
 ```
 
-## 8. 검증
+## 9. LangSmith 추적
+
+환경변수만 설정하면 LangGraph 실행 전 구간이 자동으로 추적됩니다. 노드 코드는 손대지 않았습니다.
+
+```toml
+LANGSMITH_TRACING  = "true"
+LANGSMITH_API_KEY  = "lsv2_pt_..."
+LANGSMITH_PROJECT  = "promptshield"
+LANGSMITH_ENDPOINT = "https://api.smith.langchain.com"
+```
+
+키가 없으면 추적이 꺼진 채로 정상 동작합니다 (사이드바 ⚙️ 환경 설정에서 상태 확인).
+
+**트레이스에는 조건부 엣지의 판정 과정이 그대로 남습니다.** 분기 함수(`route_triage`,
+`route_by_risk`, `route_after_code`, `route_after_grade`, `route_after_intel`,
+`route_after_verify`)가 각각 독립 실행 단위로 기록되어, 어떤 입력에 어떤 분기를 골랐는지
+추적 화면에서 바로 확인할 수 있습니다.
+
+6개 경로를 모두 태운 실제 트레이스 (공개 링크):
+
+| 경로 | 트레이스 |
+| --- | --- |
+| 지식 검색 → CE4 웹 폴백 | [AML.T0051 완화책](https://smith.langchain.com/public/0a16a7cd-bf2f-439f-b36b-86cad650863f/r) |
+| 웹 인텔 → CE5 NVD 조회 | [CVE-2024-5184](https://smith.langchain.com/public/853565c3-36d3-4cca-88ca-1d58c3525e1c/r) |
+| 시각화 | [테넌트별 차단 건수 차트](https://smith.langchain.com/public/58b98ce5-0e2d-4ad4-bcf9-8d9ea98de84b/r) |
+| 일반 답변 | [일반 질문](https://smith.langchain.com/public/d10712ff-e228-4dac-9b17-d7ffeb39ccc6/r) |
+
+
+## 10. 검증
 
 ```bash
 python -m tests.test_routes    # 분기 함수 19건
@@ -175,7 +213,7 @@ python -m tests.test_sandbox   # 코드 실행 샌드박스 23건
 - CE3 자기치유 루프 — 잘못된 열 이름으로 실패시킨 뒤 재시도가 오류를 읽고 코드를 고쳐 복구하는 것을 확인
 - CE4 웹 폴백 · CE6 재작성이 실제 질문에서 발화하는 것을 확인
 
-## 9. 보안 설계 — 생성 코드 샌드박스
+## 11. 보안 설계 — 생성 코드 샌드박스
 
 이 앱은 사용자 질문을 LLM 에 넘겨 pandas/matplotlib 코드를 생성한 뒤 실행합니다.
 즉 **프롬프트 인젝션이 곧 임의 코드 실행**이 되는 구조이고, 공개 URL 로 배포하므로 반드시 막아야 합니다.
@@ -199,7 +237,7 @@ python -m tests.test_sandbox   # 코드 실행 샌드박스 23건
 
 검증: `python -m tests.test_sandbox` — 공격 코드 16종 전부 차단, 정상 분석 코드 7종 전부 통과.
 
-## 10. 그 밖의 한계
+## 12. 그 밖의 한계
 
 - `plot.png` 를 고정 파일명으로 저장합니다. 다수 사용자가 동시에 접속하면 차트가 섞일 수 있습니다.
 - Tavily 무료 플랜은 월 1,000회, NVD 무인증 API는 30초당 5회 제한이 있습니다. 두 API 모두 실패해도 그래프는 멈추지 않고 남은 근거로 답변합니다.

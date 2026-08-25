@@ -6,7 +6,7 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 배포 URL | *(배포 후 기입)* |
+| 배포 URL | https://fsi-report-js.streamlit.app/ |
 | 구조도 | `6조_문요셉.png` |
 | 프레임워크 | LangGraph 1.2.11 · LangChain · Streamlit 1.56 |
 | LLM | `gpt-4.1-mini` / 임베딩 `text-embedding-3-small` |

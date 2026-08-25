@@ -71,6 +71,13 @@ MUST_BLOCK = [
     ("★ matplotlib.cbook",  "print(plt.cbook)"),
     ("★ get_configdir",     "print(plt.get_configdir())"),
     ("★ import 문",          "import os\nprint(os.getcwd())"),
+    # 허용된 pandas 메서드에 위험한 콜러블을 넘겨 우회하려는 시도
+    ("★ pipe(open)",        "df.pipe(open)"),
+    ("★ apply(eval)",       "df['tenant'].apply(eval)"),
+    ("★ apply(__import__)", "df['tenant'].apply(__import__)"),
+    ("★ lambda 안 dunder",   "print(df['tenant'].apply(lambda x: x.__class__))"),
+    ("★ lambda 안 import",   "print(df['tenant'].apply(lambda x: __import__('os')))"),
+    ("★ np.array(open())",  "print(np.array(open('/etc/passwd')))"),
 ]
 
 # 반드시 동작해야 하는 정상 분석 코드

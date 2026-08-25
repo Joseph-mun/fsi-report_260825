@@ -154,6 +154,31 @@ MUST_PASS = [
 ]
 
 
+def check_stdout_isolation() -> bool:
+    """타임아웃이 나도 프로세스 전역 stdout 이 오염되지 않아야 합니다.
+
+    redirect_stdout 을 쓰면 스레드를 버릴 때 컨텍스트가 끝나지 않아
+    이후 앱 출력이 버려진 버퍼로 흘러갑니다.
+    """
+    import sys
+
+    original = sys.stdout
+    # 타임아웃을 넘기되 곧 끝나는 부하. 파이썬은 스레드를 강제 종료할 수 없으므로
+    # 너무 무거우면 테스트 프로세스가 끝나지 않는다 (README 12절의 알려진 한계).
+    slow = "t = 0\nfor i in range(30000):\n    for j in range(300):\n        t += 1"
+    run_code(slow, require_output=False, timeout=0.5,
+             extra_attrs=set(DF.columns), df=DF.copy(), pd=pd, np=np, plt=plt)
+    restored = sys.stdout is original
+
+    out, ok = run_code("print(df.shape)", extra_attrs=set(DF.columns),
+                       df=DF.copy(), pd=pd, np=np, plt=plt)
+    works_after = ok and "3" in out
+
+    print(f"[{'PASS' if restored else 'FAIL'}] 타임아웃 후 sys.stdout 원복")
+    print(f"[{'PASS' if works_after else 'FAIL'}] 타임아웃 후 정상 실행")
+    return restored and works_after
+
+
 def main() -> int:
     failures = 0
 
@@ -176,7 +201,11 @@ def main() -> int:
         failures += not ok
         print(f"[{'PASS' if ok else 'FAIL'}] {name:20} {out[:50].replace(chr(10), ' ')}")
 
-    total = len(MUST_BLOCK) + len(MUST_PASS)
+    print("\n=== stdout 격리 ===")
+    if not check_stdout_isolation():
+        failures += 1
+
+    total = len(MUST_BLOCK) + len(MUST_PASS) + 2
     print(f"\n{total - failures}/{total} 통과")
     return 1 if failures else 0
 

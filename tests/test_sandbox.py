@@ -114,6 +114,12 @@ MUST_BLOCK = [
     ("★ pipe 별칭",          "p = df.pipe\nprint(p(len))"),
     # 함수로 바인딩된 이름도 나중에 문자열로 덮이면 신뢰하지 않는다.
     ("★ map 함수 재바인딩",     "f = lambda x: x\nf = 'to_csv'\nprint(df['tenant'].map(f).head(1))"),
+    # 메모리 폭주 — 실행 시간 상한은 빠른 할당을 잡지 못한다.
+    # 1GB 환경에서 한 줄로 앱을 죽일 수 있다.
+    ("★ 리스트 폭발",         "print(len([0] * (10**8)))"),
+    ("★ 좌결합 곱셈 폭발",      "print(len([0] * 1000 * 1000 * 1000))"),
+    ("★ 문자열 곱셈 폭발",      "print(len('a' * 2000 * 2000))"),
+    ("★ 큰 range",         "print(sum(range(10**9)))"),
 ]
 
 # 반드시 동작해야 하는 정상 분석 코드
@@ -142,6 +148,9 @@ MUST_PASS = [
     ("pipe(len)",     "print(df.pipe(len))"),
     ("차단률 idiom",    "print((df['action'] == 'blocked').groupby(df['tenant']).mean())"),
     ("concat 다중통계",  "g = df.groupby('tenant')['latency_ms']\nprint(pd.concat([g.mean(), g.max()], axis=1))"),
+    ("백분율 곱셈",     "print(round(df['action'].eq('blocked').mean() * 100, 1))"),
+    ("배율 곱 사슬",    "print((df['latency_ms'] * 2 * 3).mean())"),
+    ("try/except",   "try:\n    x = df['nope']\nexcept KeyError:\n    print('없는 열')"),
 ]
 
 

@@ -55,7 +55,16 @@ _ALLOWED_BUILTINS = {
     "float", "format", "frozenset", "int", "isinstance", "issubclass", "len",
     "list", "map", "max", "min", "next", "print", "range", "repr", "reversed",
     "round", "set", "slice", "sorted", "str", "sum", "tuple", "type", "zip",
+    # 예외 이름 — try/except 를 쓸 수 있게 한다. 이 이름들로는 아무 데도
+    # 갈 수 없다(내부 속성 접근은 밑줄 규칙이 계속 막는다).
+    "Exception", "ValueError", "KeyError", "TypeError", "IndexError",
+    "ZeroDivisionError", "AttributeError", "RuntimeError",
 }
+
+# 코드에 쓸 수 있는 숫자 리터럴 상한. 데이터가 662행이므로 이보다 큰 수를
+# 적을 이유가 없습니다. [0] * 10**8 같은 한 줄로 1GB 환경을 넘겨 버리는
+# 메모리 폭주를 막습니다(실행 시간 상한은 빠른 할당을 잡지 못합니다).
+_MAX_LITERAL = 1_000_000
 
 # 코드가 참조할 수 있는 최상위 이름. 실행 네임스페이스에 미리 넣어 줍니다.
 _ALLOWED_ROOTS = {"df", "pd", "np", "plt"}
@@ -166,6 +175,56 @@ def python_code_parser(text: str) -> str:
         return processed
 
     return "\n".join(parts[i] for i in range(1, len(parts), 2))
+
+
+def _const_int(node: ast.AST) -> int | None:
+    """상수만으로 이루어진 정수 산술식의 값을 계산합니다.
+
+    `10 ** 8` 은 리터럴이 10 과 8 이라 크기 검사를 그냥 통과합니다.
+    실제 값을 알아야 `[0] * (10 ** 8)` 같은 메모리 폭주를 막을 수 있습니다.
+    계산할 수 없으면 None 을 돌려줍니다.
+    """
+    if isinstance(node, ast.Constant):
+        return node.value if isinstance(node.value, int) else None
+
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+        inner = _const_int(node.operand)
+        return None if inner is None else (-inner if isinstance(node.op, ast.USub) else inner)
+
+    if isinstance(node, ast.BinOp):
+        left, right = _const_int(node.left), _const_int(node.right)
+        if left is None or right is None:
+            return None
+        try:
+            if isinstance(node.op, ast.Add):
+                return left + right
+            if isinstance(node.op, ast.Sub):
+                return left - right
+            if isinstance(node.op, ast.Mult):
+                return left * right
+            if isinstance(node.op, ast.Pow):
+                # 지수가 크면 계산 자체가 비싸므로 먼저 막는다.
+                if right > 64 or abs(left) > 1000:
+                    return _MAX_LITERAL + 1
+                return left ** right
+        except Exception:
+            return None
+    return None
+
+
+def _mult_scale(node: ast.AST) -> int:
+    """곱셈 사슬에 곱해진 정수 상수들의 곱을 돌려줍니다.
+
+    `[0] * 1000 * 1000 * 1000` 은 좌결합이라 가장 안쪽 피연산자가 리스트입니다.
+    그래서 상수 폴딩이 끊기고 개별 상수(1000)는 모두 상한 이하입니다.
+    배율만 따로 곱해 보면 10억이 나오므로 이 경로를 잡을 수 있습니다.
+    """
+    if isinstance(node, ast.Constant) and isinstance(node.value, int):
+        return abs(node.value)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult):
+        return _mult_scale(node.left) * _mult_scale(node.right)
+    folded = _const_int(node)
+    return abs(folded) if folded is not None else 1
 
 
 def _check_dispatch_arg(node: ast.AST, func_names: set[str], method: str) -> str | None:
@@ -331,6 +390,24 @@ def check_code(code: str, extra_attrs: set[str] | None = None) -> str | None:
         # 3) import 전면 금지 — pd·np·plt 는 이미 네임스페이스에 있다.
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             return "import 는 필요하지 않습니다 (df, pd, np, plt 가 이미 준비되어 있습니다)"
+
+        # 3-1) 지나치게 큰 수 금지 — 메모리 폭주 방어.
+        #      [0] * (10 ** 8) 한 줄이면 1GB 환경이 넘어간다.
+        #      실행 시간 상한은 이런 빠른 할당을 잡지 못한다.
+        if isinstance(node, (ast.Constant, ast.BinOp, ast.UnaryOp)):
+            value = _const_int(node)
+            if value is not None and abs(value) > _MAX_LITERAL:
+                return (
+                    f"너무 큰 수입니다 (최대 {_MAX_LITERAL:,}) — "
+                    "데이터는 그보다 훨씬 작습니다"
+                )
+            # 좌결합 곱셈 사슬은 폴딩이 끊기므로 배율만 따로 본다.
+            if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult):
+                if _mult_scale(node) > _MAX_LITERAL:
+                    return (
+                        f"곱셈 배율이 너무 큽니다 (최대 {_MAX_LITERAL:,}) — "
+                        "메모리 폭주를 막기 위한 제한입니다"
+                    )
 
         # 4) while 루프 금지 — 데이터 조회·차트에 필요 없고,
         #    무한 루프로 공개 앱을 멈춰 세우는 가장 쉬운 수단이다.

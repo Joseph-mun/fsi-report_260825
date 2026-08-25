@@ -66,6 +66,12 @@ LOG_ANALYST = """당신은 {description} 를 분석하는 데이터 분석가입
 - `.pivot_table(..., aggfunc='mean')` 은 사용할 수 있습니다.
 - 원소별 변환이 필요하면 `.apply` 대신 `.map(lambda x: ...)` 을 쓰거나,
   `.round()` `.astype()` 같은 벡터 연산을 쓰세요.
+- **그룹별 조건 집계**는 불리언 Series 를 그룹핑하세요. 이게 가장 흔한 패턴입니다.
+    blocked = (df['action'] == 'blocked').groupby(df['tenant']).sum()   # 그룹별 건수
+    rate    = (df['action'] == 'blocked').groupby(df['tenant']).mean()  # 그룹별 비율
+  `df.groupby(...).apply(lambda x: ...)` 형태는 쓸 수 없습니다.
+- 여러 Series 를 한 표로 묶을 때는 pd.concat 을 쓰세요.
+    print(pd.concat([a.rename('요청수'), b.rename('차단수')], axis=1))
 - 숫자 하나만 찍지 말고 무엇을 계산한 값인지 알 수 있게 라벨을 붙이세요.
   예: print('미탐 건수:', n)  /  print(result)  (Series·DataFrame 은 그대로 출력)
 - injection_label 은 정답 라벨(1=공격), detector_score 는 탐지기 점수,

@@ -315,39 +315,64 @@ class PromptShield:
         }
 
     # -- 9. playbook_writer --------------------------------------------------
-    def playbook_writer(self, state: State) -> dict:
-        """모아온 근거를 종합해 최종 답변(대응 플레이북)을 씁니다."""
+    @staticmethod
+    def _collect_evidence(state: State) -> str:
+        """수집된 근거를 라벨이 붙은 하나의 문서로 모읍니다.
+
+        playbook_writer 와 verifier 가 **같은 근거**를 보게 하는 것이 핵심입니다.
+        예전에는 verifier 에게 조회 결과 문자열만 넘겼는데,
+        "탐지기가 놓친 공격은?" 같은 질문의 결과가 `9` 한 글자라
+        검증관이 그 숫자가 무엇인지 알 수 없어 정답을 탈락시켰습니다.
+        그래서 실행한 코드까지 함께 넘겨 숫자의 맥락이 드러나게 합니다.
+        """
         risk = state.get("risk") or {}
-        evidence = []
+        parts = []
+
         if risk:
-            evidence.append(
+            parts.append(
                 f"## 위험 판정\n- 점수: {risk.get('score')} ({risk.get('level')})\n"
                 f"- ATLAS 기법: {risk.get('technique')}\n- 근거: {risk.get('rationale')}"
             )
+
         if state.get("plot"):
-            evidence.append(f"## 차트 생성 결과\n{state['data'][:2000]}")
+            parts.append(f"## 차트 생성 결과\n{(state.get('data') or '')[:2000]}")
         elif state.get("data"):
-            evidence.append(f"## 로그 조회 결과\n```\n{state['data'][:3000]}\n```")
+            block = [f"## 게이트웨이 로그 조회 결과 (질문: {state.get('question','')})"]
+            if state.get("code"):
+                block.append(
+                    "실행한 조회 코드:\n```python\n"
+                    f"{state['code'].strip()[:1200]}\n```"
+                )
+            block.append(f"위 코드의 실행 출력:\n```\n{state['data'][:3000]}\n```")
+            block.append(
+                "→ 이 출력은 실제 로그 데이터(llm_gateway_logs.csv)를 코드로 집계한 "
+                "결과이므로, 질문에 대한 근거로 그대로 사용할 수 있습니다."
+            )
+            parts.append("\n\n".join(block))
+
         if state.get("context"):
-            evidence.append(f"## 지식베이스 검색\n{state['context'][:6000]}")
+            parts.append(f"## 지식베이스 검색\n{state['context'][:6000]}")
         if state.get("web_results"):
-            evidence.append(f"## 웹 위협 인텔\n{state['web_results'][:5000]}")
+            parts.append(f"## 웹 위협 인텔\n{state['web_results'][:5000]}")
 
-        if not evidence:
-            evidence.append("(수집된 근거 없음)")
+        return "\n\n".join(parts) if parts else "(수집된 근거 없음)"
 
+    def playbook_writer(self, state: State) -> dict:
+        """모아온 근거를 종합해 최종 답변(대응 플레이북)을 씁니다."""
+        evidence = self._collect_evidence(state)
         rewrite = int(state.get("rewrite_count") or 0)
         human = "질문: {question}\n\n수집된 근거:\n{evidence}"
         if rewrite > 0:
             human += (
                 "\n\n주의: 직전 답변이 근거 충실도 검증에서 탈락했습니다. "
-                "근거에 없는 단정을 모두 제거하고 다시 쓰세요."
+                "근거에서 확인되지 않는 단정만 덜어내고, **근거에서 확인되는 사실은 "
+                "그대로 유지**하세요. 근거에 답이 있는데도 '알 수 없다'고 쓰면 안 됩니다."
             )
 
         chain = self._chain(prompts.PLAYBOOK_WRITER, human)
         generation = chain.invoke({
             "question": state["question"],
-            "evidence": "\n\n".join(evidence),
+            "evidence": evidence,
         })
 
         return {
@@ -359,12 +384,8 @@ class PromptShield:
     # -- 10. verifier --------------------------------------------------------
     def verifier(self, state: State) -> dict:
         """답변이 근거에 실제로 기반하는지 검증합니다 (환각 차단)."""
-        evidence = "\n".join(filter(None, [
-            str(state.get("risk") or ""),
-            (state.get("data") or "")[:2000],
-            (state.get("context") or "")[:4000],
-            (state.get("web_results") or "")[:3000],
-        ]))
+        # playbook_writer 와 동일한 근거를 봐야 판정이 어긋나지 않습니다.
+        evidence = self._collect_evidence(state)
 
         chain = self._chain(
             prompts.VERIFIER,
@@ -374,7 +395,7 @@ class PromptShield:
         )
         try:
             result = chain.invoke({
-                "evidence": evidence or "(근거 없음)",
+                "evidence": evidence,
                 "generation": state.get("generation", ""),
             })
             verdict = str(result.get("verdict", "")).strip().lower()

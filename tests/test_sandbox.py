@@ -52,6 +52,11 @@ MUST_BLOCK = [
     # 자원 고갈
     ("★ 무한 루프",          "while True:\n    pass"),
     ("★ class 정의 탈출",     "class X:\n    pass\nprint(X)"),
+    # format 문자열은 속성 접근을 문자열 리터럴 안에 숨겨 AST 를 통과한다.
+    ("★ format 클래스 walk",  "print('{0.__class__.__bases__}'.format(()))"),
+    ("★ format 모듈 dict",   "print('{0.__dict__}'.format(pd.util))"),
+    ("★ format_map",       "print('{a.__class__}'.format_map({'a': 1}))"),
+    ("★ 변수 경유 format",     "s = '{0.__class__}'\nprint(s.format(1))"),
 ]
 
 # 반드시 동작해야 하는 정상 분석 코드
@@ -67,6 +72,8 @@ MUST_PASS = [
     ("for 루프",       "for t in sorted(df.tenant.unique()):\n    print(t, (df.tenant == t).sum())"),
     ("apply/lambda",  "print(df['detector_score'].apply(lambda x: round(x, 1)).value_counts().head(2))"),
     ("describe",      "print(df['detector_score'].describe())"),
+    ("f-string 라벨",   "t = 'a'\nprint(f'{t}: {(df.tenant == t).sum()}건')"),
+    ("문자열 연결 퍼센트",  "print('차단률: ' + str(round(df.action.eq('blocked').mean() * 100, 1)) + '%')"),
 ]
 
 

@@ -205,10 +205,10 @@ LANGSMITH_ENDPOINT = "https://api.smith.langchain.com"
 ```bash
 python -m tests.test_routes    # 분기 함수 22건
 python -m tests.test_graph     # 그래프 구조 4건 (노드 수·조건부 엣지 수)
-python -m tests.test_sandbox   # 코드 실행 샌드박스 37건
+python -m tests.test_sandbox   # 코드 실행 샌드박스 43건
 ```
 
-**총 63건 전부 통과.** 그 밖에 구현 중 확인한 사항:
+**총 69건 전부 통과.** 그 밖에 구현 중 확인한 사항:
 
 - 6개 라우팅 경로를 실제 LLM 호출로 종단 확인
 - CE3 자기치유 루프 — 잘못된 열 이름으로 실패시킨 뒤 재시도가 오류를 읽고 코드를 고쳐 복구하는 것을 확인
@@ -249,7 +249,7 @@ o.environ.get('OPENAI_API_KEY')   # API 키도 그대로 읽힌다
 (`change_plot_to_save`). 파일명은 호출마다 `plot_<uuid>.png` 로 달라져,
 대화 기록의 이전 차트가 덮이거나 동시 접속자끼리 섞이지 않습니다.
 
-검증: `python -m tests.test_sandbox` — 공격 코드 **26종 전부 차단**, 정상 분석 코드 **11종 전부 통과**.
+검증: `python -m tests.test_sandbox` — 공격 코드 **30종 전부 차단**, 정상 분석 코드 **13종 전부 통과**.
 
 ## 12. 그 밖의 한계
 

@@ -20,9 +20,9 @@
 
 ## 3중 방어
 
-1. AST 구조 검사  — 밑줄 이름, 위험 모듈 속성, 미허용 import, while 루프 거부
-2. 토큰 블록리스트 — 파일 I/O 메서드 등 이름 기반 차단 (보조 방어)
-3. 런타임 제한    — 화이트리스트 내장함수, import 후크, 실행 시간 상한
+1. AST 구조 검사 — 밑줄 이름, 위험 속성명, 미허용 import, while/class 거부
+2. 런타임 제한   — 화이트리스트 내장함수 + import 후크
+3. 실행 시간 상한 — 15초 초과 시 중단 (무한 루프 방어)
 """
 
 from __future__ import annotations
@@ -74,6 +74,10 @@ _FORBIDDEN_ATTRS = {
     "savefig", "imsave", "imread", "imshow_file",
     # 표현식 평가기
     "query", "eval",
+    # 포맷 문자열 — '{0.__class__.__bases__}'.format(x) 처럼 속성 접근이
+    # 문자열 리터럴 안에 숨어 AST 검사를 통과한다. f-string 은 구문 트리에
+    # 그대로 드러나므로 검사에 걸리지만, .format() 은 보이지 않는다.
+    "format", "format_map",
     # 스타일러(파일 출력 경로를 가진다)
     "style",
 }

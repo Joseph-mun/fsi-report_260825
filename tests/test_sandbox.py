@@ -96,6 +96,13 @@ MUST_BLOCK = [
     ("★ 리스트 인덱스 이름",    "L = ['to_csv']\ndf.agg(L[0], 0, '/tmp/pwn5.csv')"),
     ("★ applymap 문자열",   "df.applymap('to_csv')"),
     ("★ groupby.transform","df.groupby('tenant').transform('to_csv', 0, '/tmp/pwn6.csv')"),
+    # agg/aggregate/transform 은 허용 목록에서 제거했다. 가드를 덧대는 방식으로는
+    # 아래 두 경로(별칭·재바인딩)가 계속 새서, 속성 자체를 못 쓰게 막았다.
+    ("★ 별칭 디스패처",       "a = df.agg\na('to_csv', 0, '/tmp/pwn7.csv')"),
+    ("★ lambda 후 재바인딩",  "f = lambda x: x\nf = 'to_csv'\ndf.agg(f, 0, '/tmp/pwn8.csv')"),
+    ("★ def 후 재바인딩",     "def f(x):\n    return x\nf = 'to_csv'\ndf.agg(f, 0, '/tmp/pwn9.csv')"),
+    ("★ transform 별칭",    "t = df.transform\nt('to_csv', 0, '/tmp/pwn10.csv')"),
+    ("★ aggregate 직접",    "df.aggregate('to_csv', 0, '/tmp/pwn11.csv')"),
 ]
 
 # 반드시 동작해야 하는 정상 분석 코드
@@ -114,12 +121,11 @@ MUST_PASS = [
     ("f-string 라벨",   "t = 'a'\nprint(f'{t}: {(df.tenant == t).sum()}건')"),
     ("문자열 연결 퍼센트",  "print('차단률: ' + str(round(df.action.eq('blocked').mean() * 100, 1)) + '%')"),
     # 디스패처의 정상 사용 — 위 차단이 이걸 깨뜨리면 안 된다
-    ("agg 문자열",     "print(df.groupby('tenant')['latency_ms'].agg('mean'))"),
-    ("agg 리스트",     "print(df.groupby('tenant')['latency_ms'].agg(['mean', 'max']))"),
-    ("agg 딕셔너리",   "print(df.groupby('tenant').agg({'latency_ms': 'mean'}))"),
+    ("groupby 평균",   "print(df.groupby('tenant')['latency_ms'].mean())"),
+    ("describe",      "print(df.groupby('tenant')['latency_ms'].describe())"),
+    ("다중통계 묶기",    "g = df.groupby('tenant')['latency_ms']\nprint(pd.DataFrame({'mean': g.mean(), 'max': g.max()}))"),
     ("ndarray 출력",  "print(np.array([1, 2, 3]))"),
-    ("agg 딕셔너리+리스트", "print(df.groupby('tenant').agg({'latency_ms': ['mean', 'max']}))"),
-    ("named agg",     "print(df.groupby('tenant').agg(avg=('latency_ms', 'mean')))"),
+    ("pivot_table",   "print(df.pivot_table(index='tenant', values='latency_ms', aggfunc='mean'))"),
     ("def 함수 전달",    "def f(s):\n    return s.mean()\nprint(df.groupby('tenant')['latency_ms'].apply(f))"),
     ("lambda 변수 전달",  "g = lambda s: s.max()\nprint(df.groupby('tenant')['latency_ms'].apply(g))"),
     ("pipe(len)",     "print(df.pipe(len))"),

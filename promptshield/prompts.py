@@ -55,6 +55,15 @@ LOG_ANALYST = """당신은 {description} 를 분석하는 데이터 분석가입
 - `df`(데이터), `pd`(pandas), `np`(numpy) 가 이미 준비되어 있습니다.
   **import 문을 쓰지 마세요.** 파일을 읽거나 쓰는 코드도 쓰지 마세요.
 - 결과는 반드시 print() 로 출력하세요. 출력이 없으면 실패로 처리됩니다.
+- `.agg()` / `.aggregate()` / `.transform()` 은 사용할 수 없습니다(보안 제한).
+  대신 집계 메서드를 직접 부르세요.
+    df.groupby('tenant')['latency_ms'].mean()
+    df.groupby('tenant')['latency_ms'].describe()
+  여러 통계가 필요하면 각각 계산해 print() 를 여러 번 하거나,
+  pd.concat 으로 Series 들을 옆으로 붙여 하나의 표로 만드세요.
+    g = df.groupby('tenant')['latency_ms']
+    print(pd.concat([g.mean(), g.max(), g.count()], axis=1))
+- `.pivot_table(..., aggfunc='mean')` 은 사용할 수 있습니다.
 - 숫자 하나만 찍지 말고 무엇을 계산한 값인지 알 수 있게 라벨을 붙이세요.
   예: print('미탐 건수:', n)  /  print(result)  (Series·DataFrame 은 그대로 출력)
 - injection_label 은 정답 라벨(1=공격), detector_score 는 탐지기 점수,

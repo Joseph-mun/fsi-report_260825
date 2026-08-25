@@ -72,7 +72,7 @@ _PANDAS_ATTRS = {
     "dtypes", "T", "empty", "name", "isin", "where", "mask", "filter",
     "head", "tail", "sample", "nlargest", "nsmallest", "first", "last",
     # 집계 · 통계
-    "groupby", "agg", "aggregate", "apply", "map", "transform", "pipe",
+    "groupby", "apply", "map", "pipe",
     "sum", "mean", "median", "min", "max", "std", "var", "count", "size",
     "nunique", "unique", "value_counts", "describe", "quantile", "mode",
     "cumsum", "cumcount", "rank", "corr", "cov", "sem", "prod",
@@ -121,12 +121,21 @@ _MATPLOTLIB_ATTRS = {
     "kind", "ax", "figsize", "rot", "color", "alpha", "label", "stacked",
 }
 
-# pandas 는 아래 메서드에 **문자열**을 넘기면 그 이름의 메서드를 런타임에 찾아
-# 호출합니다. 문자열은 ast.Constant 라 속성 검사에 잡히지 않으므로,
+# pandas 의 agg / aggregate / transform 은 **문자열을 메서드 이름으로 해석**해
+# 호출합니다. 문자열은 구문 트리에서 그냥 상수라 속성 검사에 잡히지 않으므로,
 #   df.agg('to_csv', 0, '/tmp/x')
-# 처럼 거부된 메서드를 이름으로 되살릴 수 있습니다. 실제로 파일이 쓰였습니다.
-# 그래서 이 메서드들에 넘어가는 문자열은 따로 검사합니다.
-_DISPATCH_METHODS = {"agg", "aggregate", "apply", "transform", "pipe", "map", "applymap"}
+# 로 거부한 메서드가 되살아나 파일이 실제로 쓰였습니다.
+#
+# 인자를 검사하는 가드를 붙여 봤지만 계속 새는 구멍이 나왔습니다.
+#   a = df.agg;  a('to_csv', ...)              # 별칭 — 호출부가 Attribute 가 아니다
+#   f = lambda x: x;  f = 'to_csv';  df.agg(f) # 재바인딩 — 검사가 흐름을 못 본다
+#
+# 그래서 가드를 덧대는 대신 **이 셋을 허용 목록에서 아예 뺐습니다.**
+# 속성 자체에 닿을 수 없으니 별칭도 재바인딩도 성립하지 않습니다.
+#
+# 아래 검사는 남은 apply/pipe/map/applymap 에 대한 이중 방어입니다.
+# (실측 결과 이들은 문자열을 임의 메서드로 디스패치하지 않습니다)
+_DISPATCH_METHODS = {"apply", "pipe", "map", "applymap"}
 
 # 디스패처에 문자열로 넘길 수 있는 이름 (집계 함수만).
 _ALLOWED_DISPATCH_NAMES = {

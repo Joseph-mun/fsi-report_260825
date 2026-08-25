@@ -16,7 +16,7 @@ from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
-from utils import change_plot_to_save, python_code_parser, run_code
+from utils import change_plot_to_save, check_code, python_code_parser, run_code
 
 from . import prompts
 from .schema import ROUTES, State, risk_level
@@ -274,12 +274,26 @@ class PromptShield:
             description=DATA_DESCRIPTION, schema=self.schema_hint
         )
         chain = self._chain(system, "{question}") | python_code_parser
-        code = change_plot_to_save(
-            chain.invoke({"question": state["question"]}), str(self.plot_path)
-        )
+        raw_code = chain.invoke({"question": state["question"]})
+
+        # LLM 코드를 먼저 검사한 뒤, 저장 구문은 우리가 통제해서 붙인다.
+        # (순서를 바꾸면 우리가 붙인 savefig 가 검사에 걸린다)
+        violation = check_code(raw_code)
+        if violation:
+            return {
+                "code": raw_code,
+                "data": f"차트 생성을 거부했습니다. {violation}",
+                "plot": "",
+                "notes": self._note(state, f"차트 생성 거부: {violation}"),
+            }
+
+        code = change_plot_to_save(raw_code, str(self.plot_path))
         self.plot_path.unlink(missing_ok=True)
         # 차트 코드는 stdout 이 비는 게 정상이므로 출력 유무로 성패를 가르지 않는다.
-        output, ok = run_code(code, require_output=False, df=self.df.copy(), pd=pd, plt=plt)
+        output, ok = run_code(
+            code, require_output=False, pre_checked=True,
+            df=self.df.copy(), pd=pd, plt=plt,
+        )
         made = ok and self.plot_path.exists()
 
         if made:

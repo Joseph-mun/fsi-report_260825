@@ -5,9 +5,14 @@
     python -m tests.test_sandbox
 """
 
+import matplotlib
+import numpy as np
 import pandas as pd
 
-from utils import run_code
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt  # noqa: E402
+
+from utils import run_code  # noqa: E402
 
 DF = pd.DataFrame({
     "tenant": ["a", "b", "a"],
@@ -57,6 +62,15 @@ MUST_BLOCK = [
     ("★ format 모듈 dict",   "print('{0.__dict__}'.format(pd.util))"),
     ("★ format_map",       "print('{a.__class__}'.format_map({'a': 1}))"),
     ("★ 변수 경유 format",     "s = '{0.__class__}'\nprint(s.format(1))"),
+    # 아래는 밑줄 규칙만 있던 시절 아키텍트 검증에서 실제로 뚫린 경로다.
+    # numpy/matplotlib 은 밑줄 없는 공개 속성으로 하위 모듈을 노출한다.
+    ("★ np DataSource 파일읽기", "print(np.lib.npyio.DataSource('.').open('.env').read())"),
+    ("★ canvas.print_png",  "plt.plot([1, 2])\nplt.gcf().canvas.print_png('/tmp/x.png')"),
+    ("★ canvas.print_figure","plt.plot([1])\nplt.gcf().canvas.print_figure('/tmp/x.pdf')"),
+    ("★ np.ctypeslib 로더",  "print(np.ctypeslib.load_library)"),
+    ("★ matplotlib.cbook",  "print(plt.cbook)"),
+    ("★ get_configdir",     "print(plt.get_configdir())"),
+    ("★ import 문",          "import os\nprint(os.getcwd())"),
 ]
 
 # 반드시 동작해야 하는 정상 분석 코드
@@ -67,7 +81,7 @@ MUST_PASS = [
     ("crosstab",      "print(pd.crosstab(df.injection_label, df.action))"),
     ("to_datetime",   "print(pd.to_datetime(df['timestamp']).dt.date.min())"),
     ("value_counts",  "print(df['action'].value_counts())"),
-    ("numpy 통계",     "import numpy as np\nprint(np.mean(df['latency_ms']))"),
+    ("numpy 통계",     "print(np.mean(df['latency_ms']))"),
     ("pivot_table",   "print(df.pivot_table(index='tenant', values='latency_ms', aggfunc='mean'))"),
     ("for 루프",       "for t in sorted(df.tenant.unique()):\n    print(t, (df.tenant == t).sum())"),
     ("apply/lambda",  "print(df['detector_score'].apply(lambda x: round(x, 1)).value_counts().head(2))"),
@@ -82,14 +96,20 @@ def main() -> int:
 
     print("=== 차단되어야 하는 코드 ===")
     for name, code in MUST_BLOCK:
-        out, ok = run_code(code, df=DF.copy(), pd=pd)
+        out, ok = run_code(
+            code, timeout=6, extra_attrs=set(DF.columns),
+            df=DF.copy(), pd=pd, np=np, plt=plt,
+        )
         blocked = not ok
         failures += not blocked
         print(f"[{'PASS' if blocked else 'FAIL'}] {name:20} {out[:60]}")
 
     print("\n=== 동작해야 하는 코드 ===")
     for name, code in MUST_PASS:
-        out, ok = run_code(code, df=DF.copy(), pd=pd)
+        out, ok = run_code(
+            code, timeout=6, extra_attrs=set(DF.columns),
+            df=DF.copy(), pd=pd, np=np, plt=plt,
+        )
         failures += not ok
         print(f"[{'PASS' if ok else 'FAIL'}] {name:20} {out[:50].replace(chr(10), ' ')}")
 

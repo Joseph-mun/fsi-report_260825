@@ -4,25 +4,41 @@
 공개 URL 로 배포하므로 **프롬프트 인젝션이 곧 임의 코드 실행**이 되지 않도록
 막아야 합니다.
 
-## 왜 AST 검사인가
+## 왜 허용 목록인가 — 두 번 실패한 뒤 내린 결론
 
-처음에는 금지 문자열 목록(블록리스트)으로 막았는데, 실제로 뚫렸습니다.
+1차: 금지 문자열 목록(블록리스트). 뚫렸다.
 
-    o = pd._libs.pandas.compat.os      # 소스에 'os.' 라는 문자열이 없다
+    o = pd._libs.pandas.compat.os      # 소스에 'os.' 문자열이 없다
     o.system('...')                    # 그래도 진짜 os 모듈이다
 
-`pd` 라는 살아있는 모듈 객체가 스코프에 있는 한, 점 표기법을 따라가면
-어떤 표준 모듈이든 닿습니다. 소스 문자열만 훑는 방식으로는 이 경로를 셀 수 없습니다.
+2차: AST 로 밑줄 이름을 막았다. 또 뚫렸다.
 
-그래서 **구조**를 검사합니다. 파이썬에서 내부 구현으로 내려가는 길은 거의 전부
-밑줄로 시작하는 이름(`_libs`, `__class__`, `__globals__`)을 거치므로,
-밑줄로 시작하는 이름·속성 접근을 전부 거부하면 그 통로가 통째로 닫힙니다.
+    np.lib.npyio.DataSource('.').open('.env').read()   # .env 를 그대로 읽었다
+    plt.gcf().canvas.print_png('/tmp/x')               # 임의 경로 파일 쓰기
+    np.ctypeslib.load_library(...)                     # ctypes 로더 (Linux 에서 RCE)
 
-## 3중 방어
+"내부로 가는 길은 밑줄을 지난다"는 전제가 numpy/matplotlib 에는 통하지 않는다.
+이 패키지들은 **밑줄 없는 공개 속성으로 살아있는 하위 모듈을 그대로 노출**한다.
+금지 이름을 하나씩 추가하는 방식은 수렴하지 않는다 — 허용된 패키지마다 공개
+하위 모듈이 수십 개씩 있다.
 
-1. AST 구조 검사 — 밑줄 이름, 위험 속성명, 미허용 import, while/class 거부
-2. 런타임 제한   — 화이트리스트 내장함수 + import 후크
-3. 실행 시간 상한 — 15초 초과 시 중단 (무한 루프 방어)
+3차(현재): **허용 목록으로 뒤집었다.** 명시적으로 허용한 속성 이름만 쓸 수 있다.
+`lib`, `npyio`, `DataSource`, `canvas`, `print_png`, `ctypeslib` 는 목록에 없으므로
+자동으로 거부된다. 새로운 하위 모듈이 생겨도 기본값이 '거부'다.
+
+## 방어 구성
+
+1. AST 허용 목록 — 허용한 속성/이름만 통과. import 는 전면 금지
+   (pd·np·plt 는 실행 네임스페이스에 미리 넣어 주므로 import 가 필요 없다)
+2. 런타임 제한  — 화이트리스트 내장함수만 남긴 네임스페이스
+3. 실행 시간 상한 — 15초 초과 시 중단
+
+## 한계 (문서화)
+
+같은 프로세스 안에서 exec 하는 구조 자체의 한계는 남는다. 허용한 pandas 메서드에
+새로운 파일 I/O 인자가 생기면 다시 뚫릴 수 있다. 완전한 격리가 필요하면 별도
+프로세스 + OS 수준 샌드박스로 가야 한다. 이 앱은 실습 범위이므로 허용 목록으로
+공격면을 좁히는 선에서 멈춘다.
 """
 
 from __future__ import annotations
@@ -39,56 +55,74 @@ _ALLOWED_BUILTINS = {
     "float", "format", "frozenset", "int", "isinstance", "issubclass", "len",
     "list", "map", "max", "min", "next", "print", "range", "repr", "reversed",
     "round", "set", "slice", "sorted", "str", "sum", "tuple", "type", "zip",
-    "True", "False", "None",
 }
 
-# import 를 허용할 모듈. 이 목록 밖은 거부합니다.
-_ALLOWED_MODULES = {
-    "pandas", "numpy", "matplotlib", "matplotlib.pyplot", "math", "statistics",
-    "datetime", "collections", "itertools", "re",
+# 코드가 참조할 수 있는 최상위 이름. 실행 네임스페이스에 미리 넣어 줍니다.
+_ALLOWED_ROOTS = {"df", "pd", "np", "plt"}
+
+# ---------------------------------------------------------------------------
+# 허용 속성 목록
+# ---------------------------------------------------------------------------
+# 여기 없는 속성 이름은 전부 거부됩니다. 새 하위 모듈이 생겨도 기본값이 '거부'라
+# 시간이 지나도 안전합니다. 필요한 분석 기능이 막히면 이 목록에 추가하세요.
+
+_PANDAS_ATTRS = {
+    # 선택 · 필터
+    "loc", "iloc", "at", "iat", "columns", "index", "values", "shape", "size",
+    "dtypes", "T", "empty", "name", "isin", "where", "mask", "filter",
+    "head", "tail", "sample", "nlargest", "nsmallest", "first", "last",
+    # 집계 · 통계
+    "groupby", "agg", "aggregate", "apply", "map", "transform", "pipe",
+    "sum", "mean", "median", "min", "max", "std", "var", "count", "size",
+    "nunique", "unique", "value_counts", "describe", "quantile", "mode",
+    "cumsum", "cumcount", "rank", "corr", "cov", "sem", "prod",
+    "idxmax", "idxmin", "any", "all",
+    # 변형 · 정렬
+    "sort_values", "sort_index", "reset_index", "set_index", "rename",
+    "assign", "drop", "dropna", "fillna", "replace", "astype", "copy",
+    "pivot_table", "pivot", "melt", "merge", "join", "concat", "crosstab",
+    "cut", "qcut", "get_dummies", "to_datetime", "to_numeric", "date_range",
+    "round", "abs", "clip", "diff", "shift", "unstack", "stack", "explode",
+    "drop_duplicates", "duplicated", "notna", "isna", "isnull", "notnull",
+    "reindex", "squeeze", "add_prefix", "add_suffix", "nlargest",
+    "DataFrame", "Series", "Timestamp", "Timedelta", "NA", "NaT",
+    # 비교 연산 (메서드 형태)
+    "eq", "ne", "lt", "le", "gt", "ge", "between", "add", "sub", "mul", "div",
+    # 접근자
+    "str", "dt", "cat", "sort", "tolist", "to_list", "items", "keys",
+    # str 접근자 하위
+    "contains", "startswith", "endswith", "lower", "upper", "strip", "len",
+    "split", "extract", "replace", "title", "capitalize", "zfill", "slice",
+    # dt 접근자 하위
+    "year", "month", "day", "hour", "minute", "date", "time", "weekday",
+    "dayofweek", "quarter", "days", "total_seconds", "floor", "normalize",
 }
 
-# 속성 접근으로 닿으면 안 되는 이름. 밑줄 규칙과 겹치지만,
-# `pd.compat.os` 처럼 밑줄 없이 노출되는 경로를 함께 막습니다.
-_FORBIDDEN_ATTRS = {
-    # 모듈로 가는 통로
-    "os", "sys", "subprocess", "socket", "shutil", "pathlib", "tempfile",
-    "importlib", "pickle", "marshal", "ctypes", "platform", "builtins",
-    "compat", "io", "requests", "urllib", "http", "glob", "inspect",
-    "threading", "multiprocessing", "signal", "gc", "code", "codeop",
-    # 실행·반영
-    "system", "popen", "spawn", "fork", "exec", "eval", "compile",
-    "environ", "getenv", "putenv",
-    "getattr", "setattr", "delattr", "vars", "globals", "locals",
-    # 파일 I/O (pandas/numpy/matplotlib)
-    "read_csv", "read_json", "read_pickle", "read_parquet", "read_excel",
-    "read_table", "read_html", "read_sql", "read_fwf", "read_feather",
-    "read_orc", "read_stata", "read_sas", "read_spss", "read_xml",
-    "read_gbq", "read_hdf", "read_clipboard",
-    "to_csv", "to_json", "to_pickle", "to_parquet", "to_excel", "to_sql",
-    "to_hdf", "to_feather", "to_orc", "to_stata", "to_xml", "to_gbq",
-    "to_clipboard", "to_string", "to_html", "to_latex", "to_markdown",
-    "save", "load", "fromfile", "tofile", "savetxt", "loadtxt", "genfromtxt",
-    "savez", "savez_compressed", "memmap",
-    # 이미지 저장 — 차트 저장은 change_plot_to_save 가 통제해서 붙인다
-    "savefig", "imsave", "imread", "imshow_file",
-    # 표현식 평가기
-    "query", "eval",
-    # 포맷 문자열 — '{0.__class__.__bases__}'.format(x) 처럼 속성 접근이
-    # 문자열 리터럴 안에 숨어 AST 검사를 통과한다. f-string 은 구문 트리에
-    # 그대로 드러나므로 검사에 걸리지만, .format() 은 보이지 않는다.
-    "format", "format_map",
-    # 스타일러(파일 출력 경로를 가진다)
-    "style",
+_NUMPY_ATTRS = {
+    "mean", "median", "std", "var", "sum", "min", "max", "abs", "round",
+    "percentile", "quantile", "array", "arange", "linspace", "log", "log10",
+    "exp", "sqrt", "where", "unique", "histogram", "corrcoef", "nan",
+    "clip", "cumsum", "sort", "argsort", "isnan", "isfinite",
 }
 
-# 이름(변수/함수)으로 직접 부르면 안 되는 것. 내장함수 화이트리스트로도 막히지만
-# 오류 메시지를 명확히 하려고 별도로 검사합니다.
-_FORBIDDEN_NAMES = {
-    "eval", "exec", "compile", "open", "input", "breakpoint",
-    "getattr", "setattr", "delattr", "globals", "locals", "vars", "dir",
-    "__import__", "memoryview", "bytearray",
+_MATPLOTLIB_ATTRS = {
+    # pyplot 함수
+    "plot", "bar", "barh", "hist", "scatter", "pie", "boxplot", "violinplot",
+    "stackplot", "fill_between", "errorbar", "step", "hexbin", "imshow",
+    "title", "xlabel", "ylabel", "legend", "grid", "xticks", "yticks",
+    "xlim", "ylim", "tight_layout", "subplots", "subplot", "figure", "close",
+    "axhline", "axvline", "text", "annotate", "colorbar", "suptitle",
+    "set_title", "set_xlabel", "set_ylabel", "set_xticks", "set_xticklabels",
+    "set_ylim", "set_xlim", "bar_label", "invert_yaxis", "invert_xaxis",
+    # show 는 프롬프트가 코드의 마지막 줄로 요구한다. Agg 백엔드에서는
+    # 아무 일도 하지 않고, change_plot_to_save 가 savefig 로 치환한다.
+    "show", "gca", "gcf", "sca", "cla", "clf", "axis", "twinx", "twiny",
+    # DataFrame.plot 접근자
+    "kind", "ax", "figsize", "rot", "color", "alpha", "label", "stacked",
 }
+
+# 위 세 묶음의 합집합이 최종 허용 목록입니다.
+_ALLOWED_ATTRS = _PANDAS_ATTRS | _NUMPY_ATTRS | _MATPLOTLIB_ATTRS
 
 
 class SandboxViolation(RuntimeError):
@@ -106,63 +140,76 @@ def python_code_parser(text: str) -> str:
     return "\n".join(parts[i] for i in range(1, len(parts), 2))
 
 
-def check_code(code: str) -> str | None:
-    """실행 전 구조 검사. 문제가 있으면 사유 문자열, 없으면 None."""
+def check_code(code: str, extra_attrs: set[str] | None = None) -> str | None:
+    """실행 전 구조 검사. 문제가 있으면 사유 문자열, 없으면 None.
+
+    extra_attrs:
+        CSV 열 이름처럼 이 데이터셋에서만 유효한 속성. `df.tenant` 같은
+        열 접근을 허용하기 위해 호출부가 넘겨 줍니다.
+    """
     try:
         tree = ast.parse(code)
     except SyntaxError as exc:
         return f"구문 오류: {exc.msg} (line {exc.lineno})"
 
+    allowed_attrs = _ALLOWED_ATTRS | (extra_attrs or set())
+    # 코드가 스스로 만든 지역 변수는 참조를 허용해야 합니다.
+    assigned: set[str] = set()
     for node in ast.walk(tree):
-        # 1) 밑줄로 시작하는 속성 접근 — 내부 구현으로 내려가는 통로를 막는다.
-        #    pd._libs.pandas.compat.os 같은 경로가 여기서 걸린다.
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            assigned.add(node.id)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            assigned.add(node.name)
+            for a in node.args.args + node.args.kwonlyargs:
+                assigned.add(a.arg)
+        elif isinstance(node, ast.Lambda):
+            for a in node.args.args + node.args.kwonlyargs:
+                assigned.add(a.arg)
+        elif isinstance(node, ast.comprehension):
+            for t in ast.walk(node.target):
+                if isinstance(t, ast.Name):
+                    assigned.add(t.id)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            assigned.add(node.name)
+
+    for node in ast.walk(tree):
+        # 1) 속성 접근 — 허용 목록에 있는 이름만 통과시킨다.
+        #    np.lib / npyio / DataSource / canvas / print_png / ctypeslib 처럼
+        #    밑줄 없이 공개된 하위 모듈이 여기서 전부 걸린다.
         if isinstance(node, ast.Attribute):
             if node.attr.startswith("_"):
                 return f"내부 속성 접근 금지: .{node.attr}"
-            if node.attr in _FORBIDDEN_ATTRS:
-                return f"허용되지 않은 속성 접근: .{node.attr}"
+            if node.attr not in allowed_attrs:
+                return (
+                    f"허용되지 않은 속성: .{node.attr} "
+                    "(데이터 조회·차트에 필요한 속성만 사용할 수 있습니다)"
+                )
 
-        # 2) 밑줄로 시작하는 이름 (__builtins__, __import__ 등)
-        if isinstance(node, ast.Name):
+        # 2) 이름 참조 — 허용 루트, 내장 함수, 코드가 만든 변수만
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
             if node.id.startswith("_"):
                 return f"내부 이름 사용 금지: {node.id}"
-            if node.id in _FORBIDDEN_NAMES:
-                return f"허용되지 않은 함수 사용: {node.id}"
+            if node.id not in _ALLOWED_ROOTS | _ALLOWED_BUILTINS | assigned:
+                return f"허용되지 않은 이름: {node.id}"
 
-        # 3) import 는 허용 목록만
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                root = alias.name.split(".")[0]
-                if alias.name not in _ALLOWED_MODULES and root not in _ALLOWED_MODULES:
-                    return f"허용되지 않은 모듈 import: {alias.name}"
-        if isinstance(node, ast.ImportFrom):
-            module = node.module or ""
-            root = module.split(".")[0]
-            if module not in _ALLOWED_MODULES and root not in _ALLOWED_MODULES:
-                return f"허용되지 않은 모듈 import: {module}"
+        # 3) import 전면 금지 — pd·np·plt 는 이미 네임스페이스에 있다.
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            return "import 는 필요하지 않습니다 (df, pd, np, plt 가 이미 준비되어 있습니다)"
 
-        # 4) while 루프 금지 — 데이터 조회·차트에 필요 없고, 무한 루프로
-        #    공개 앱을 멈춰 세우는 가장 쉬운 수단이다.
+        # 4) while 루프 금지 — 데이터 조회·차트에 필요 없고,
+        #    무한 루프로 공개 앱을 멈춰 세우는 가장 쉬운 수단이다.
         if isinstance(node, ast.While):
             return "while 루프는 허용되지 않습니다 (pandas 연산을 사용하세요)"
 
-        # 5) 클래스 정의 금지 — 메서드 해석 순서를 타고 내려가는 우회의 출발점
+        # 5) class 정의 금지 — 메서드 해석 순서를 타고 내려가는 우회의 출발점
         if isinstance(node, ast.ClassDef):
             return "class 정의는 허용되지 않습니다"
 
     return None
 
 
-def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
-    root = name.split(".")[0]
-    if name not in _ALLOWED_MODULES and root not in _ALLOWED_MODULES:
-        raise SandboxViolation(f"허용되지 않은 모듈 import: {name}")
-    return builtins.__import__(name, globals, locals, fromlist, level)
-
-
 def _build_safe_builtins() -> dict:
     safe = {n: getattr(builtins, n) for n in _ALLOWED_BUILTINS if hasattr(builtins, n)}
-    safe["__import__"] = _guarded_import
     return safe
 
 
@@ -171,6 +218,7 @@ def run_code(
     require_output: bool = True,
     pre_checked: bool = False,
     timeout: float = 15.0,
+    extra_attrs: set[str] | None = None,
     **namespace,
 ) -> tuple[str, bool]:
     """코드를 제한된 환경에서 실행하고 (stdout, 성공여부) 를 돌려줍니다.
@@ -190,7 +238,7 @@ def run_code(
         돌려주고 사용자는 멈춘 화면을 보지 않습니다.
     """
     if not pre_checked:
-        violation = check_code(code)
+        violation = check_code(code, extra_attrs)
         if violation:
             return f"SandboxViolation: {violation}", False
 

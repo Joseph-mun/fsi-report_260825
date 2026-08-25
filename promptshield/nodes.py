@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 from uuid import uuid4
 
+import numpy as np
 import pandas as pd
 from langchain_community.vectorstores import FAISS
 from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
@@ -52,6 +53,9 @@ class PromptShield:
         self.df = pd.read_csv(data_dir / "llm_gateway_logs.csv")
         self.columns = ", ".join(self.df.columns)
         self.schema_hint = self._build_schema_hint(self.df)
+        # df.tenant 처럼 열을 속성으로 접근하는 코드를 허용하기 위해
+        # 실제 열 이름을 샌드박스 허용 목록에 넘긴다.
+        self.column_attrs = set(self.df.columns)
 
         embeddings = OpenAIEmbeddings(
             model="text-embedding-3-small", api_key=openai_api_key
@@ -178,7 +182,10 @@ class PromptShield:
                 "error": state.get("data", ""),
             })
 
-        output, ok = run_code(code, require_output=True, df=self.df.copy(), pd=pd)
+        output, ok = run_code(
+            code, require_output=True, extra_attrs=self.column_attrs,
+            df=self.df.copy(), pd=pd, np=np,
+        )
         note = "로그 조회 성공" if ok else f"로그 조회 실패 (시도 {retry + 1})"
         return {
             "code": code,
@@ -298,7 +305,7 @@ class PromptShield:
 
         # LLM 코드를 먼저 검사한 뒤, 저장 구문은 우리가 통제해서 붙인다.
         # (순서를 바꾸면 우리가 붙인 savefig 가 검사에 걸린다)
-        violation = check_code(raw_code)
+        violation = check_code(raw_code, self.column_attrs)
         if violation:
             return {
                 "code": raw_code,
@@ -312,7 +319,7 @@ class PromptShield:
         # 차트 코드는 stdout 이 비는 게 정상이므로 출력 유무로 성패를 가르지 않는다.
         output, ok = run_code(
             code, require_output=False, pre_checked=True,
-            df=self.df.copy(), pd=pd, plt=plt,
+            df=self.df.copy(), pd=pd, np=np, plt=plt,
         )
         made = ok and plot_path.exists()
 

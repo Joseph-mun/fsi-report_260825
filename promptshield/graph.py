@@ -43,11 +43,10 @@ def route_after_code(state: State) -> str:
     LLM 이 만든 pandas 코드는 열 이름 오타나 dtype 착오로 자주 실패한다.
     오류 메시지를 되먹여 재생성시키되, MAX_CODE_RETRY 로 상한을 건다.
     """
-    output = state.get("data") or ""
-    failed = output.startswith(("NameError", "KeyError", "TypeError", "ValueError",
-                               "AttributeError", "SyntaxError", "IndexError",
-                               "(출력 없음"))
-    if not failed:
+    # log_analyst 가 넘겨준 실행 성패를 그대로 신뢰한다.
+    # 출력 문자열을 다시 파싱하면 목록에 없는 예외(ZeroDivisionError 등)를
+    # 성공으로, 'ValueError' 로 시작하는 정상 출력을 실패로 오판한다.
+    if state.get("code_ok", True):
         return "ok"
     if int(state.get("code_retry") or 0) < MAX_CODE_RETRY:
         return "retry"
@@ -56,7 +55,7 @@ def route_after_code(state: State) -> str:
 
 def route_after_grade(state: State) -> str:
     """CE4 — CRAG. 검색이 빈약하면 웹 인텔로 보강한다."""
-    return "fallback" if state.get("verdict") == "insufficient" else "ok"
+    return "fallback" if state.get("grade") == "insufficient" else "ok"
 
 
 def route_after_intel(state: State) -> str:
@@ -145,8 +144,8 @@ def create_app(
     openai_api_key: str,
     tavily_api_key: str | None,
     data_dir: Path,
-    plot_path: Path,
+    plot_dir: Path,
 ):
     """PromptShield 리소스를 준비하고 컴파일된 그래프를 돌려줍니다."""
-    shield = PromptShield(openai_api_key, tavily_api_key, data_dir, plot_path)
+    shield = PromptShield(openai_api_key, tavily_api_key, data_dir, plot_dir)
     return shield, build_graph(shield)

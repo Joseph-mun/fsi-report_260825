@@ -90,7 +90,8 @@ def to_dot() -> str:
 def to_mermaid() -> str:
     out = ["graph TD"]
     for src, dst, label, cond in EDGES:
-        arrow = f"-- {label} -->" if label else "-->"
+        # 라벨에 괄호·화살표·부등호가 들어가므로 반드시 인용해야 파싱된다.
+        arrow = f'-->|"{label}"|' if label else "-->"
         out.append(f"    {src} {arrow} {dst}")
     return "\n".join(out)
 
@@ -117,11 +118,13 @@ def render(out_path: Path) -> bool:
     # 2) mermaid.ink (네트워크 필요)
     try:
         import base64
+        import json
 
         import requests
 
+        # repr() 은 작은따옴표를 내서 JSON 이 아니게 된다. json.dumps 를 써야 한다.
         encoded = base64.urlsafe_b64encode(
-            f'{{"code":{to_mermaid()!r},"mermaid":{{"theme":"default"}}}}'.encode()
+            json.dumps({"code": to_mermaid(), "mermaid": {"theme": "default"}}).encode()
         ).decode()
         resp = requests.get(f"https://mermaid.ink/img/{encoded}?type=png", timeout=20)
         resp.raise_for_status()

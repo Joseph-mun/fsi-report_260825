@@ -19,7 +19,7 @@ from promptshield.graph import create_app
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
-PLOT_PATH = BASE_DIR / "plot.png"
+PLOT_DIR = BASE_DIR / "plots"
 
 load_dotenv(BASE_DIR / ".env")
 
@@ -153,7 +153,7 @@ if not openai_api_key:
 
 @st.cache_resource(show_spinner=False)
 def init_app(_openai_key: str, _tavily_key: str | None):
-    return create_app(_openai_key, _tavily_key, DATA_DIR, PLOT_PATH)
+    return create_app(_openai_key, _tavily_key, DATA_DIR, PLOT_DIR)
 
 
 if "app" not in st.session_state:
@@ -267,7 +267,14 @@ if prompt:
                         response.update(node_output or {})
                         render_route(graph_slot, steps_slot, visited, finished=False)
             except Exception as exc:
-                st.error(f"처리 중 오류가 발생했습니다: {type(exc).__name__}: {exc}")
+                # 사용자 메시지는 이미 기록에 들어갔으므로, 실패도 함께 남겨야
+                # 다음 질문에서 답 없는 질문만 덩그러니 남지 않는다.
+                err = f"처리 중 오류가 발생했습니다: {type(exc).__name__}: {exc}"
+                st.error(err)
+                st.session_state.last_visited = visited
+                st.session_state.messages.append(
+                    {"role": "assistant", "content": err, "image": None, "meta": ""}
+                )
                 st.stop()
 
             st.session_state.last_visited = visited

@@ -269,8 +269,10 @@ def main() -> int:
     load_dotenv(BASE_DIR / ".env")
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
+        # CSV·문서는 이미 다 만들어졌다. 임베딩만 건너뛴 것이므로
+        # --skip-index 와 동일하게 성공으로 끝낸다.
         log("! OPENAI_API_KEY 가 없어 인덱싱을 건너뜁니다 (.env 확인)")
-        return 1
+        return 0
 
     build_index(api_key)
     return 0

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from uuid import uuid4
 
 import pandas as pd
 from langchain_community.vectorstores import FAISS
@@ -23,6 +24,7 @@ from .schema import ROUTES, State, risk_level
 from .tools import find_cve_ids, nvd_lookup, tavily_search
 
 DATA_DESCRIPTION = "LLM API 게이트웨이 접근 로그 (프롬프트 공격 탐지 결과 포함)"
+NO_EVIDENCE = "(수집된 근거 없음)"
 
 
 class PromptShield:
@@ -33,7 +35,7 @@ class PromptShield:
         openai_api_key: str,
         tavily_api_key: str | None,
         data_dir: Path,
-        plot_path: Path,
+        plot_dir: Path,
     ) -> None:
         self.llm = ChatOpenAI(model="gpt-4.1-mini", api_key=openai_api_key)
         # 라우팅·채점·검증은 흔들리면 안 되므로 temperature 를 0 으로 고정합니다.
@@ -41,7 +43,11 @@ class PromptShield:
             model="gpt-4.1-mini", api_key=openai_api_key, temperature=0
         )
         self.tavily_api_key = tavily_api_key
-        self.plot_path = plot_path
+        # 차트는 호출마다 고유 파일로 저장한다. 고정 파일명(plot.png)을 쓰면
+        # 두 번째 차트가 첫 번째를 덮어써서, 대화 기록에 남아 있던 이전 차트까지
+        # 최신 그림으로 바뀌어 버린다 (동시 접속자끼리도 섞인다).
+        self.plot_dir = plot_dir
+        self.plot_dir.mkdir(parents=True, exist_ok=True)
 
         self.df = pd.read_csv(data_dir / "llm_gateway_logs.csv")
         self.columns = ", ".join(self.df.columns)
@@ -56,6 +62,12 @@ class PromptShield:
             allow_dangerous_deserialization=True,
         )
         self.retriever = self.vectorstore.as_retriever(search_kwargs={"k": 4})
+
+    def _prune_plots(self, keep: int = 100) -> None:
+        """오래된 차트 파일을 정리합니다 (배포 환경 디스크 보호)."""
+        files = sorted(self.plot_dir.glob("plot_*.png"), key=lambda f: f.stat().st_mtime)
+        for stale in files[:-keep]:
+            stale.unlink(missing_ok=True)
 
     @staticmethod
     def _build_schema_hint(df: pd.DataFrame, max_values: int = 12) -> str:
@@ -171,6 +183,11 @@ class PromptShield:
         return {
             "code": code,
             "data": output,
+            # run_code 가 판정한 성패를 그대로 넘긴다. 예전에는 CE3 가 출력
+            # 문자열을 다시 파싱해 추측했는데, ZeroDivisionError 처럼 목록에 없는
+            # 예외는 성공으로, 'ValueError...' 로 시작하는 정상 출력은 실패로
+            # 오판했다.
+            "code_ok": ok,
             "code_retry": retry + 1,
             "notes": self._note(state, note),
             "citations": self._cite(
@@ -223,8 +240,11 @@ class PromptShield:
         if grade not in ("sufficient", "insufficient"):
             grade = "sufficient"
 
+        # grade 와 verdict 를 분리한다. 예전에는 둘 다 verdict 를 써서,
+        # verifier 가 값을 갱신하지 못하면 grade_docs 가 남긴 'sufficient' 가
+        # CE6 에서 'pass' 가 아니라는 이유로 불필요한 재작성을 유발했다.
         return {
-            "verdict": grade,
+            "grade": grade,
             "notes": self._note(state, f"검색 품질: {grade} ({reason})"),
         }
 
@@ -287,18 +307,19 @@ class PromptShield:
                 "notes": self._note(state, f"차트 생성 거부: {violation}"),
             }
 
-        code = change_plot_to_save(raw_code, str(self.plot_path))
-        self.plot_path.unlink(missing_ok=True)
+        plot_path = self.plot_dir / f"plot_{uuid4().hex[:12]}.png"
+        code = change_plot_to_save(raw_code, str(plot_path))
         # 차트 코드는 stdout 이 비는 게 정상이므로 출력 유무로 성패를 가르지 않는다.
         output, ok = run_code(
             code, require_output=False, pre_checked=True,
             df=self.df.copy(), pd=pd, plt=plt,
         )
-        made = ok and self.plot_path.exists()
+        made = ok and plot_path.exists()
 
         if made:
+            self._prune_plots()
             data = (
-                f"차트를 생성해 {self.plot_path.name} 로 저장했습니다.\n"
+                f"차트를 생성해 {plot_path.name} 로 저장했습니다.\n"
                 f"차트를 그리는 데 사용한 코드:\n```python\n{code}\n```"
             )
         else:
@@ -307,7 +328,7 @@ class PromptShield:
         return {
             "code": code,
             "data": data,
-            "plot": str(self.plot_path) if made else "",
+            "plot": str(plot_path) if made else "",
             "notes": self._note(state, "차트 생성 성공" if made else f"차트 생성 실패: {output[:120]}"),
             "citations": self._cite(
                 state, [{"kind": "csv", "title": "llm_gateway_logs.csv", "url": ""}]
@@ -334,7 +355,11 @@ class PromptShield:
                 f"- ATLAS 기법: {risk.get('technique')}\n- 근거: {risk.get('rationale')}"
             )
 
-        if state.get("plot"):
+        # 분기는 plot 값이 아니라 route 로 판단한다. 차트 생성이 실패하면
+        # plot 이 빈 문자열이라, 예전에는 실패 메시지가 아래 '로그 조회 결과'
+        # 블록으로 흘러들어가 "실제 로그를 집계한 결과"라고 라벨이 붙었다.
+        # 검증관도 같은 라벨을 보므로 지어낸 답이 검증을 통과해 버렸다.
+        if state.get("route") == "plot":
             parts.append(f"## 차트 생성 결과\n{(state.get('data') or '')[:2000]}")
         elif state.get("data"):
             block = [f"## 게이트웨이 로그 조회 결과 (질문: {state.get('question','')})"]
@@ -351,11 +376,11 @@ class PromptShield:
             parts.append("\n\n".join(block))
 
         if state.get("context"):
-            parts.append(f"## 지식베이스 검색\n{state['context'][:6000]}")
+            parts.append(f"## 지식베이스 검색\n{state['context'][:4000]}")
         if state.get("web_results"):
-            parts.append(f"## 웹 위협 인텔\n{state['web_results'][:5000]}")
+            parts.append(f"## 웹 위협 인텔\n{state['web_results'][:4000]}")
 
-        return "\n\n".join(parts) if parts else "(수집된 근거 없음)"
+        return "\n\n".join(parts) if parts else NO_EVIDENCE
 
     def playbook_writer(self, state: State) -> dict:
         """모아온 근거를 종합해 최종 답변(대응 플레이북)을 씁니다."""
@@ -386,6 +411,18 @@ class PromptShield:
         """답변이 근거에 실제로 기반하는지 검증합니다 (환각 차단)."""
         # playbook_writer 와 동일한 근거를 봐야 판정이 어긋나지 않습니다.
         evidence = self._collect_evidence(state)
+        rewrite = int(state.get("rewrite_count") or 0)
+
+        # 검증할 사실 주장이 아예 없는 경우에는 LLM 을 부르지 않는다.
+        #  - 근거가 없으면 "근거가 없다"고 쓴 답변뿐이라 검증할 것이 없다.
+        #  - 차트 요청은 그림을 만들었을 뿐 수치를 단정하지 않는다.
+        # 노드와 CE6 은 그대로 살아 있고, 불필요한 LLM 호출 1회만 줄인다.
+        if evidence == NO_EVIDENCE or state.get("route") == "plot":
+            return {
+                "verdict": "pass",
+                "rewrite_count": rewrite,
+                "notes": self._note(state, "근거 검증: pass (검증할 사실 주장 없음 — 생략)"),
+            }
 
         chain = self._chain(
             prompts.VERIFIER,
@@ -406,7 +443,6 @@ class PromptShield:
         if verdict not in ("pass", "fail"):
             verdict = "pass"
 
-        rewrite = int(state.get("rewrite_count") or 0)
         return {
             "verdict": verdict,
             # fail 이면 재작성 카운터를 올려 무한 루프를 막습니다.

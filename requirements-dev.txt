@@ -1,0 +1,11 @@
+# 데이터 준비 · 구조도 생성 전용 (배포에는 불필요)
+#
+#   pip install -r requirements.txt -r requirements-dev.txt
+#   python prepare_data.py
+#   python make_diagram.py
+
+-r requirements.txt
+
+pyarrow==25.0.1     # HuggingFace parquet 읽기 (pd.read_parquet)
+PyYAML==6.0.3       # MITRE ATLAS YAML 파싱
+pypdf==6.16.1       # NIST PDF 파싱 (PyPDFLoader)

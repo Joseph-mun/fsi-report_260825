@@ -18,6 +18,7 @@ class State(TypedDict, total=False):
     generation: str      # 최종 답변
     code: str            # 생성된 pandas / matplotlib 코드
     data: str            # 코드 실행 결과
+    code_ok: bool        # 코드 실행 성공 여부 (CE3 이 신뢰하는 신호)
     plot: str            # 생성된 차트 이미지 경로 (없으면 빈 문자열)
     context: str         # RAG 로 검색한 원문
     web_results: str     # Tavily / NVD 결과
@@ -25,7 +26,8 @@ class State(TypedDict, total=False):
     citations: list      # 근거 출처 목록
     code_retry: int      # 자기치유 루프 카운터 (상한 MAX_CODE_RETRY)
     rewrite_count: int   # 재작성 루프 카운터 (상한 MAX_REWRITE)
-    verdict: str         # 검증 결과 pass / fail
+    grade: str           # grade_docs 채점 결과 sufficient / insufficient
+    verdict: str         # verifier 검증 결과 pass / fail
     notes: list          # 사용자에게 보여줄 진행 메모
 
 

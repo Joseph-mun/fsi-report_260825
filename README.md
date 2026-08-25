@@ -101,7 +101,8 @@ LLM API 게이트웨이의 요청 로그입니다. HuggingFace **`deepset/prompt
 ### 로컬
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.txt              # 앱 실행용
+pip install -r requirements-dev.txt          # 데이터 준비까지 하려면
 
 # .env 파일 생성
 cat > .env <<EOF
@@ -202,12 +203,12 @@ LANGSMITH_ENDPOINT = "https://api.smith.langchain.com"
 ## 10. 검증
 
 ```bash
-python -m tests.test_routes    # 분기 함수 19건
+python -m tests.test_routes    # 분기 함수 22건
 python -m tests.test_graph     # 그래프 구조 4건 (노드 수·조건부 엣지 수)
-python -m tests.test_sandbox   # 코드 실행 샌드박스 23건
+python -m tests.test_sandbox   # 코드 실행 샌드박스 37건
 ```
 
-**총 46건 전부 통과.** 그 밖에 구현 중 확인한 사항:
+**총 63건 전부 통과.** 그 밖에 구현 중 확인한 사항:
 
 - 6개 라우팅 경로를 실제 LLM 호출로 종단 확인
 - CE3 자기치유 루프 — 잘못된 열 이름으로 실패시킨 뒤 재시도가 오류를 읽고 코드를 고쳐 복구하는 것을 확인
@@ -215,30 +216,42 @@ python -m tests.test_sandbox   # 코드 실행 샌드박스 23건
 
 ## 11. 보안 설계 — 생성 코드 샌드박스
 
-이 앱은 사용자 질문을 LLM 에 넘겨 pandas/matplotlib 코드를 생성한 뒤 실행합니다.
+이 앱은 사용자 질문을 LLM 에 넘겨 pandas/matplotlib 코드를 만든 뒤 실행합니다.
 즉 **프롬프트 인젝션이 곧 임의 코드 실행**이 되는 구조이고, 공개 URL 로 배포하므로 반드시 막아야 합니다.
 
-`utils.py` 에 2단 방어를 두었습니다.
+### 왜 문자열 블록리스트를 버렸나
 
-1. **정적 검사** (`check_code`) — 소스에 금지 표현이 있으면 실행 자체를 거부
-   - 인터프리터 내부 접근: `__import__`, `__subclasses__`, `eval`, `getattr` 등
-   - 시스템·네트워크: `os.`, `subprocess`, `socket`, `requests`, `pathlib` 등
-   - **pandas/numpy 파일 I/O**: `read_csv`, `to_csv`, `pd.io`, `np.load` 등
-   - 임의 경로 이미지 저장: `savefig`, `imsave`
-2. **런타임 제한** — 화이트리스트 내장함수만 남긴 네임스페이스에서 실행하고, `import` 는 pandas·numpy·matplotlib 등 허용 모듈만 통과
+처음에는 금지 문자열 목록으로 막았습니다. 실제로 뚫렸습니다.
 
-> 개발 중 실제로 발견한 구멍입니다. 내장함수만 제한했을 때 `pd.read_csv('.env')` 로
-> OpenAI API 키가 그대로 유출됐습니다. **pandas 자체가 파일 I/O 수단**이라는 점을 놓치면
-> 샌드박스가 무력화됩니다. 배포 환경에서는 `/proc/self/environ` 을 읽어 환경변수를
-> 통째로 빼내는 것도 같은 경로로 가능했습니다.
+```python
+o = pd._libs.pandas.compat.os     # 소스에 'os.' 라는 문자열이 없다
+o.system('...')                   # 그런데 진짜 os 모듈이다
+o.environ.get('OPENAI_API_KEY')   # API 키도 그대로 읽힌다
+```
 
-차트 저장은 LLM 코드를 먼저 검사한 뒤, 저장 경로를 앱이 통제해 덧붙이는 순서로 처리합니다
-(`change_plot_to_save`). LLM 이 저장 경로를 정하지 못하게 하기 위함입니다.
+`pd` 라는 **살아있는 모듈 객체**가 스코프에 있는 한 점 표기법을 따라가면 어떤 표준 모듈에든 닿습니다.
+소스 문자열만 훑는 방식으로는 이 경로를 셀 수 없습니다. `df.to_string(buf='/tmp/x')`,
+`df.style.to_html('/tmp/x')` 처럼 pandas 자체의 파일 출력 인자도 같은 이유로 새어 나갔습니다.
 
-검증: `python -m tests.test_sandbox` — 공격 코드 16종 전부 차단, 정상 분석 코드 7종 전부 통과.
+### 3중 방어
+
+1. **AST 구조 검사** (`check_code`) — 소스가 아니라 구문 트리를 봅니다.
+   - 밑줄로 시작하는 **속성·이름 접근 전면 거부** (`_libs`, `__class__`, `__globals__` …)
+     → 파이썬 내부 구현으로 내려가는 통로가 통째로 닫힙니다.
+   - 위험 속성명 거부: `os`, `sys`, `subprocess`, `compat`, `environ`, `system`,
+     pandas/numpy 파일 I/O(`read_*`, `to_*`), `savefig`, `query`, `eval`, `style`
+   - 허용 목록 밖 `import` 거부
+   - `while` 루프·`class` 정의 거부 (무한 루프와 MRO 우회 차단)
+2. **런타임 제한** — 화이트리스트 내장함수만 남긴 네임스페이스 + import 후크
+3. **실행 시간 상한** — 15초 초과 시 중단하고 사용자에게 응답 반환
+
+차트 저장은 LLM 코드를 먼저 검사한 뒤 **앱이 저장 경로를 통제해** 덧붙입니다
+(`change_plot_to_save`). 파일명은 호출마다 `plot_<uuid>.png` 로 달라져,
+대화 기록의 이전 차트가 덮이거나 동시 접속자끼리 섞이지 않습니다.
+
+검증: `python -m tests.test_sandbox` — 공격 코드 **26종 전부 차단**, 정상 분석 코드 **11종 전부 통과**.
 
 ## 12. 그 밖의 한계
 
-- `plot.png` 를 고정 파일명으로 저장합니다. 다수 사용자가 동시에 접속하면 차트가 섞일 수 있습니다.
 - Tavily 무료 플랜은 월 1,000회, NVD 무인증 API는 30초당 5회 제한이 있습니다. 두 API 모두 실패해도 그래프는 멈추지 않고 남은 근거로 답변합니다.
 - 게이트웨이 로그는 실제 운영 데이터가 아니라 공개 데이터셋 기반 **합성 데이터**입니다.

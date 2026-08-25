@@ -13,6 +13,7 @@ venv/
 
 # --- 실행 산출물 ---
 plot.png
+plots/
 
 # --- OS ---
 .DS_Store

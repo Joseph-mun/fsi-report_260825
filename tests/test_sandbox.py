@@ -36,6 +36,22 @@ MUST_BLOCK = [
     ("임의 경로 savefig",   "import matplotlib.pyplot as plt\nplt.savefig('/tmp/pwn.png')"),
     ("허용목록 밖 import",  "import pathlib\nprint(pathlib.Path('/'))"),
     ("pickle",           "print(pd.read_pickle('/tmp/x'))"),
+    # --- 아래는 문자열 블록리스트 시절 실제로 뚫렸던 경로 ---
+    # pd 라는 살아있는 모듈 객체를 타고 진짜 os 모듈에 도달했다.
+    # 소스에 'os.' 라는 문자열이 없어 블록리스트가 못 잡았다.
+    ("★ pd._libs 경유 RCE",  "o = pd._libs.pandas.compat.os\no.system('echo pwned')"),
+    ("★ pd._libs 환경변수",   "o = pd._libs.pandas.compat.os\nprint(o.environ.get('OPENAI_API_KEY'))"),
+    ("★ pd.compat.os",     "print(pd.compat.os.getcwd())"),
+    ("★ os.open 파일읽기",   "o = pd._libs.pandas.compat.os\nfd = o.open ('.env', 0)\nprint(o.read(fd, 500))"),
+    # pandas 의 buf= 인자를 통한 임의 경로 파일 쓰기
+    ("★ to_string(buf=)",  "df.head(1).to_string(buf='/tmp/ps_t1')\nprint('w')"),
+    ("★ style.to_html",    "df.head(1).style.to_html('/tmp/ps_t2')\nprint('w')"),
+    # 표현식 평가기
+    ("★ df.query",         "print(df.query('detector_score > 0.9').shape)"),
+    ("★ df.eval",          "print(df.eval('detector_score * 2'))"),
+    # 자원 고갈
+    ("★ 무한 루프",          "while True:\n    pass"),
+    ("★ class 정의 탈출",     "class X:\n    pass\nprint(X)"),
 ]
 
 # 반드시 동작해야 하는 정상 분석 코드
@@ -47,6 +63,10 @@ MUST_PASS = [
     ("to_datetime",   "print(pd.to_datetime(df['timestamp']).dt.date.min())"),
     ("value_counts",  "print(df['action'].value_counts())"),
     ("numpy 통계",     "import numpy as np\nprint(np.mean(df['latency_ms']))"),
+    ("pivot_table",   "print(df.pivot_table(index='tenant', values='latency_ms', aggfunc='mean'))"),
+    ("for 루프",       "for t in sorted(df.tenant.unique()):\n    print(t, (df.tenant == t).sum())"),
+    ("apply/lambda",  "print(df['detector_score'].apply(lambda x: round(x, 1)).value_counts().head(2))"),
+    ("describe",      "print(df['detector_score'].describe())"),
 ]
 
 

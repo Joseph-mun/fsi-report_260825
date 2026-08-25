@@ -89,6 +89,13 @@ MUST_BLOCK = [
     ("★ func= 키워드",        "df.agg(func='to_csv')"),
     ("★ agg('query')",       "print(df.agg('query', 0, 'injection_label==1'))"),
     ("★ Series agg to_json", "df['tenant'].agg('to_json')"),
+    # 이름을 동적으로 조립하면 AST 가 값을 알 수 없다. 그래서 '모르면 거부'.
+    ("★ 변수에 담은 이름",     "m = 'to_csv'\ndf.agg(m, 0, '/tmp/pwn2.csv')"),
+    ("★ f-string 이름",     "n = 'csv'\ndf.agg(f'to_{n}', 0, '/tmp/pwn3.csv')"),
+    ("★ 문자열 연결 이름",     "df.agg('to_' + 'csv', 0, '/tmp/pwn4.csv')"),
+    ("★ 리스트 인덱스 이름",    "L = ['to_csv']\ndf.agg(L[0], 0, '/tmp/pwn5.csv')"),
+    ("★ applymap 문자열",   "df.applymap('to_csv')"),
+    ("★ groupby.transform","df.groupby('tenant').transform('to_csv', 0, '/tmp/pwn6.csv')"),
 ]
 
 # 반드시 동작해야 하는 정상 분석 코드
@@ -111,6 +118,11 @@ MUST_PASS = [
     ("agg 리스트",     "print(df.groupby('tenant')['latency_ms'].agg(['mean', 'max']))"),
     ("agg 딕셔너리",   "print(df.groupby('tenant').agg({'latency_ms': 'mean'}))"),
     ("ndarray 출력",  "print(np.array([1, 2, 3]))"),
+    ("agg 딕셔너리+리스트", "print(df.groupby('tenant').agg({'latency_ms': ['mean', 'max']}))"),
+    ("named agg",     "print(df.groupby('tenant').agg(avg=('latency_ms', 'mean')))"),
+    ("def 함수 전달",    "def f(s):\n    return s.mean()\nprint(df.groupby('tenant')['latency_ms'].apply(f))"),
+    ("lambda 변수 전달",  "g = lambda s: s.max()\nprint(df.groupby('tenant')['latency_ms'].apply(g))"),
+    ("pipe(len)",     "print(df.pipe(len))"),
 ]
 
 

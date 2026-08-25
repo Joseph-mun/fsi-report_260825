@@ -156,34 +156,70 @@ def python_code_parser(text: str) -> str:
     return "\n".join(parts[i] for i in range(1, len(parts), 2))
 
 
-def _iter_dispatch_names(call: ast.Call):
-    """디스패처 호출에서 '메서드 이름으로 쓰일' 문자열만 끌어냅니다.
+def _check_dispatch_arg(node: ast.AST, func_names: set[str], method: str) -> str | None:
+    """디스패처의 '이름 자리' 인자를 검사합니다. 문제가 있으면 사유를 돌려줍니다.
 
-    df.agg(['mean', 'to_csv'])            -> mean, to_csv
-    df.agg({'latency_ms': 'mean'})        -> mean          (키는 열 이름이므로 제외)
-    df.agg('to_csv', 0, '/tmp/x')         -> to_csv        (경로 인자는 이름이 아님)
+    허용하는 것은 세 가지뿐입니다.
+      - 문자열 상수 : 집계 함수 이름 목록과 대조
+      - lambda      : 본문은 이미 AST 검사를 거친다
+      - 함수로 바인딩된 이름, 또는 허용 내장함수 이름
 
-    딕셔너리 키는 열 이름이고, 첫 인자 뒤의 위치 인자는 대상 메서드에 그대로
-    전달되는 값입니다. 둘 다 메서드 이름이 아니므로 검사 대상에서 뺍니다.
+    그 밖의 표현식은 거부합니다. 값을 정적으로 알 수 없기 때문입니다.
+
+        m = 'to_csv'
+        df.agg(m, 0, '/tmp/x')        # 변수라 이름을 알 수 없다
+        df.agg(f'to_{ext}', ...)      # f-string 도 마찬가지
+        df.agg('to_' + 'csv', ...)    # 연결도 마찬가지
+
+    위 셋 다 실제로 파일을 썼습니다. 그래서 '모르면 거부'로 갑니다.
     """
+    if isinstance(node, ast.Constant):
+        if isinstance(node.value, str) and node.value not in _ALLOWED_DISPATCH_NAMES:
+            return (
+                f"{method}() 에 넘길 수 없는 이름입니다: {node.value!r} "
+                "(집계 함수 이름이나 lambda 만 사용할 수 있습니다)"
+            )
+        return None
 
-    def walk(node):
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            yield node.value
-        elif isinstance(node, (ast.List, ast.Tuple, ast.Set)):
-            for elt in node.elts:
-                yield from walk(elt)
-        elif isinstance(node, ast.Dict):
-            # 키는 열 이름, 값이 함수 이름이다.
-            for value in node.values:
-                yield from walk(value)
+    if isinstance(node, ast.Lambda):
+        return None
 
-    # 이름이 올 수 있는 자리는 첫 위치 인자와 func= 키워드뿐이다.
+    if isinstance(node, ast.Name):
+        if node.id in func_names or node.id in _ALLOWED_BUILTINS:
+            return None
+        return (
+            f"{method}() 에는 이름을 담은 변수를 넘길 수 없습니다: {node.id} "
+            "(문자열 상수나 lambda 로 직접 적어주세요)"
+        )
+
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        for elt in node.elts:
+            bad = _check_dispatch_arg(elt, func_names, method)
+            if bad:
+                return bad
+        return None
+
+    if isinstance(node, ast.Dict):
+        # 키는 열 이름이고, 값이 함수 이름이다.
+        for value in node.values:
+            bad = _check_dispatch_arg(value, func_names, method)
+            if bad:
+                return bad
+        return None
+
+    return (
+        f"{method}() 의 첫 인자가 너무 복잡합니다 "
+        "(문자열 상수나 lambda 로 직접 적어주세요)"
+    )
+
+
+def _dispatch_targets(call: ast.Call):
+    """이름이 올 수 있는 자리만 골라 냅니다 (첫 위치 인자와 func= 키워드)."""
     if call.args:
-        yield from walk(call.args[0])
+        yield call.args[0]
     for kw in call.keywords:
         if kw.arg in (None, "func"):
-            yield from walk(kw.value)
+            yield kw.value
 
 
 def check_code(code: str, extra_attrs: set[str] | None = None) -> str | None:
@@ -201,11 +237,19 @@ def check_code(code: str, extra_attrs: set[str] | None = None) -> str | None:
     allowed_attrs = _ALLOWED_ATTRS | (extra_attrs or set())
     # 코드가 스스로 만든 지역 변수는 참조를 허용해야 합니다.
     assigned: set[str] = set()
+    # 함수로 바인딩된 이름만 따로 모읍니다. 디스패처에 넘길 수 있는 이름과
+    # 단순히 문자열을 담은 변수를 구분하기 위해서입니다.
+    func_names: set[str] = set()
     for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Lambda):
+            for t in node.targets:
+                if isinstance(t, ast.Name):
+                    func_names.add(t.id)
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
             assigned.add(node.id)
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             assigned.add(node.name)
+            func_names.add(node.name)
             for a in node.args.args + node.args.kwonlyargs:
                 assigned.add(a.arg)
         elif isinstance(node, ast.Lambda):
@@ -227,12 +271,10 @@ def check_code(code: str, extra_attrs: set[str] | None = None) -> str | None:
             and isinstance(node.func, ast.Attribute)
             and node.func.attr in _DISPATCH_METHODS
         ):
-            for name in _iter_dispatch_names(node):
-                if name not in _ALLOWED_DISPATCH_NAMES:
-                    return (
-                        f"{node.func.attr}() 에 넘길 수 없는 이름입니다: {name!r} "
-                        "(집계 함수 이름이나 lambda 만 사용할 수 있습니다)"
-                    )
+            for target in _dispatch_targets(node):
+                bad = _check_dispatch_arg(target, func_names, node.func.attr)
+                if bad:
+                    return bad
 
         # 1) 속성 접근 — 허용 목록에 있는 이름만 통과시킨다.
         #    np.lib / npyio / DataSource / canvas / print_png / ctypeslib 처럼

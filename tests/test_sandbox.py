@@ -78,6 +78,17 @@ MUST_BLOCK = [
     ("★ lambda 안 dunder",   "print(df['tenant'].apply(lambda x: x.__class__))"),
     ("★ lambda 안 import",   "print(df['tenant'].apply(lambda x: __import__('os')))"),
     ("★ np.array(open())",  "print(np.array(open('/etc/passwd')))"),
+    # pandas 는 agg/apply/transform/pipe/map 에 문자열을 넘기면 그 이름의
+    # 메서드를 런타임에 찾아 호출한다. 문자열은 ast.Constant 라 속성 검사에
+    # 안 잡히고, 예외가 나더라도 파일 쓰기는 이미 끝난 뒤다.
+    ("★ agg('to_csv')",      "df.agg('to_csv', 0, '/tmp/pwn.csv')"),
+    ("★ agg('to_pickle')",   "df.agg('to_pickle', 0, '/tmp/pwn.pkl')"),
+    ("★ transform('to_json')","df.transform('to_json', 0, '/tmp/pwn.json')"),
+    ("★ 리스트에 숨긴 to_csv",   "print(df.agg(['mean', 'to_csv']))"),
+    ("★ 딕셔너리에 숨긴 to_csv",  "df.groupby('tenant').agg({'latency_ms': 'to_csv'})"),
+    ("★ func= 키워드",        "df.agg(func='to_csv')"),
+    ("★ agg('query')",       "print(df.agg('query', 0, 'injection_label==1'))"),
+    ("★ Series agg to_json", "df['tenant'].agg('to_json')"),
 ]
 
 # 반드시 동작해야 하는 정상 분석 코드
@@ -95,6 +106,11 @@ MUST_PASS = [
     ("describe",      "print(df['detector_score'].describe())"),
     ("f-string 라벨",   "t = 'a'\nprint(f'{t}: {(df.tenant == t).sum()}건')"),
     ("문자열 연결 퍼센트",  "print('차단률: ' + str(round(df.action.eq('blocked').mean() * 100, 1)) + '%')"),
+    # 디스패처의 정상 사용 — 위 차단이 이걸 깨뜨리면 안 된다
+    ("agg 문자열",     "print(df.groupby('tenant')['latency_ms'].agg('mean'))"),
+    ("agg 리스트",     "print(df.groupby('tenant')['latency_ms'].agg(['mean', 'max']))"),
+    ("agg 딕셔너리",   "print(df.groupby('tenant').agg({'latency_ms': 'mean'}))"),
+    ("ndarray 출력",  "print(np.array([1, 2, 3]))"),
 ]
 
 

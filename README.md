@@ -205,10 +205,10 @@ LANGSMITH_ENDPOINT = "https://api.smith.langchain.com"
 ```bash
 python -m tests.test_routes    # 분기 함수 22건
 python -m tests.test_graph     # 그래프 구조 4건 (노드 수·조건부 엣지 수)
-python -m tests.test_sandbox   # 코드 실행 샌드박스 56건
+python -m tests.test_sandbox   # 코드 실행 샌드박스 68건
 ```
 
-**총 82건 전부 통과.** 그 밖에 구현 중 확인한 사항:
+**총 94건 전부 통과.** 그 밖에 구현 중 확인한 사항:
 
 - 6개 라우팅 경로를 실제 LLM 호출로 종단 확인
 - CE3 자기치유 루프 — 잘못된 열 이름으로 실패시킨 뒤 재시도가 오류를 읽고 코드를 고쳐 복구하는 것을 확인
@@ -247,6 +247,12 @@ np.ctypeslib.load_library(...)                     # ctypes 로더 (Linux 에서
 - **속성 허용 목록** — 명시적으로 허용한 이름만 통과. `lib`, `npyio`, `DataSource`,
   `canvas`, `print_png`, `ctypeslib` 는 목록에 없으므로 자동 거부됩니다.
   새 하위 모듈이 생겨도 기본이 거부라 시간이 지나도 안전합니다.
+- **디스패처 문자열 검사** — pandas 는 `agg`/`apply`/`transform`/`pipe`/`map` 에
+  문자열을 넘기면 그 이름의 메서드를 런타임에 찾아 호출합니다. 문자열은
+  구문 트리에서 그냥 상수라 속성 검사에 걸리지 않아, `df.agg('to_csv', 0, '/tmp/x')`
+  로 거부된 메서드가 되살아났습니다(**예외가 나도 파일은 이미 쓰인 뒤였습니다**).
+  이제 이 메서드들에 넘어가는 이름은 집계 함수 목록과 대조합니다.
+  `agg({'열': 'mean'})` 처럼 딕셔너리 키는 열 이름이므로 검사에서 제외합니다.
 - **이름 허용 목록** — `df`, `pd`, `np`, `plt`, 허용 내장함수, 코드가 만든 지역 변수만
 - **import 전면 금지** — 필요한 것은 실행 네임스페이스에 미리 넣어 줍니다
 - **`while` 루프·`class` 정의 금지** — 무한 루프와 MRO 우회 차단
@@ -255,8 +261,8 @@ np.ctypeslib.load_library(...)                     # ctypes 로더 (Linux 에서
 차트 저장은 LLM 코드를 먼저 검사한 뒤 **앱이 저장 경로를 통제해** 덧붙입니다.
 파일명은 호출마다 `plot_<uuid>.png` 로 달라집니다.
 
-검증: `python -m tests.test_sandbox` — 공격 **43종 전부 차단**, 정상 분석 코드 **13종 전부 통과**.
-실제 앱으로 11개 질문을 돌려 **오차단 0건**을 확인했습니다.
+검증: `python -m tests.test_sandbox` — 공격 **51종 전부 차단**, 정상 분석 코드 **17종 전부 통과**.
+실제 앱으로 12개 질문을 돌려 **오차단 0건**을 확인했습니다.
 
 ### 남는 한계
 

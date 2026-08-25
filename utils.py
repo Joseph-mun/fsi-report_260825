@@ -121,6 +121,22 @@ _MATPLOTLIB_ATTRS = {
     "kind", "ax", "figsize", "rot", "color", "alpha", "label", "stacked",
 }
 
+# pandas 는 아래 메서드에 **문자열**을 넘기면 그 이름의 메서드를 런타임에 찾아
+# 호출합니다. 문자열은 ast.Constant 라 속성 검사에 잡히지 않으므로,
+#   df.agg('to_csv', 0, '/tmp/x')
+# 처럼 거부된 메서드를 이름으로 되살릴 수 있습니다. 실제로 파일이 쓰였습니다.
+# 그래서 이 메서드들에 넘어가는 문자열은 따로 검사합니다.
+_DISPATCH_METHODS = {"agg", "aggregate", "apply", "transform", "pipe", "map", "applymap"}
+
+# 디스패처에 문자열로 넘길 수 있는 이름 (집계 함수만).
+_ALLOWED_DISPATCH_NAMES = {
+    "mean", "sum", "count", "min", "max", "median", "std", "var", "sem",
+    "nunique", "first", "last", "size", "prod", "any", "all", "mode",
+    "quantile", "skew", "kurt", "cumsum", "cumcount", "rank", "abs",
+    "idxmax", "idxmin", "unique", "nlargest", "nsmallest", "value_counts",
+    "str", "int", "float", "round", "len", "list", "set", "sorted",
+}
+
 # 위 세 묶음의 합집합이 최종 허용 목록입니다.
 _ALLOWED_ATTRS = _PANDAS_ATTRS | _NUMPY_ATTRS | _MATPLOTLIB_ATTRS
 
@@ -138,6 +154,36 @@ def python_code_parser(text: str) -> str:
         return processed
 
     return "\n".join(parts[i] for i in range(1, len(parts), 2))
+
+
+def _iter_dispatch_names(call: ast.Call):
+    """디스패처 호출에서 '메서드 이름으로 쓰일' 문자열만 끌어냅니다.
+
+    df.agg(['mean', 'to_csv'])            -> mean, to_csv
+    df.agg({'latency_ms': 'mean'})        -> mean          (키는 열 이름이므로 제외)
+    df.agg('to_csv', 0, '/tmp/x')         -> to_csv        (경로 인자는 이름이 아님)
+
+    딕셔너리 키는 열 이름이고, 첫 인자 뒤의 위치 인자는 대상 메서드에 그대로
+    전달되는 값입니다. 둘 다 메서드 이름이 아니므로 검사 대상에서 뺍니다.
+    """
+
+    def walk(node):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            yield node.value
+        elif isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+            for elt in node.elts:
+                yield from walk(elt)
+        elif isinstance(node, ast.Dict):
+            # 키는 열 이름, 값이 함수 이름이다.
+            for value in node.values:
+                yield from walk(value)
+
+    # 이름이 올 수 있는 자리는 첫 위치 인자와 func= 키워드뿐이다.
+    if call.args:
+        yield from walk(call.args[0])
+    for kw in call.keywords:
+        if kw.arg in (None, "func"):
+            yield from walk(kw.value)
 
 
 def check_code(code: str, extra_attrs: set[str] | None = None) -> str | None:
@@ -173,6 +219,21 @@ def check_code(code: str, extra_attrs: set[str] | None = None) -> str | None:
             assigned.add(node.name)
 
     for node in ast.walk(tree):
+        # 0) 디스패처에 넘어가는 문자열 검사.
+        #    df.agg('to_csv', 0, '/tmp/x') 처럼 거부된 메서드를 문자열로
+        #    되살리는 우회를 막는다. 예외가 나더라도 파일 쓰기는 이미 끝난다.
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in _DISPATCH_METHODS
+        ):
+            for name in _iter_dispatch_names(node):
+                if name not in _ALLOWED_DISPATCH_NAMES:
+                    return (
+                        f"{node.func.attr}() 에 넘길 수 없는 이름입니다: {name!r} "
+                        "(집계 함수 이름이나 lambda 만 사용할 수 있습니다)"
+                    )
+
         # 1) 속성 접근 — 허용 목록에 있는 이름만 통과시킨다.
         #    np.lib / npyio / DataSource / canvas / print_png / ctypeslib 처럼
         #    밑줄 없이 공개된 하위 모듈이 여기서 전부 걸린다.
@@ -210,6 +271,14 @@ def check_code(code: str, extra_attrs: set[str] | None = None) -> str | None:
 
 def _build_safe_builtins() -> dict:
     safe = {n: getattr(builtins, n) for n in _ALLOWED_BUILTINS if hasattr(builtins, n)}
+    # numpy 는 ndarray 를 출력할 때 내부에서 __import__ 를 호출합니다.
+    # 빼 두면 `print(np.array([1,2,3]))` 이 RuntimeError 로 죽습니다.
+    #
+    # 사용자 코드가 이걸 쓸 수는 없습니다 — AST 검사가 `import` 문과
+    # `__import__` 이름(밑줄 규칙)을 모두 거부하므로, 호출자는 라이브러리
+    # 내부뿐입니다. 설령 모듈 객체를 얻더라도 그 속성 접근은 다시
+    # 허용 목록을 통과해야 합니다.
+    safe["__import__"] = builtins.__import__
     return safe
 
 

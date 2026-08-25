@@ -252,11 +252,21 @@ def check_code(code: str, extra_attrs: set[str] | None = None) -> str | None:
     # 함수로 바인딩된 이름만 따로 모읍니다. 디스패처에 넘길 수 있는 이름과
     # 단순히 문자열을 담은 변수를 구분하기 위해서입니다.
     func_names: set[str] = set()
+    # 함수가 아닌 값으로 다시 바인딩된 이름. 검사는 흐름을 못 보므로,
+    # 한 번이라도 함수 아닌 값이 들어간 이름은 디스패처에 넘기지 못하게 한다.
+    #     f = lambda x: x;  f = 'to_csv';  df.map(f)
+    rebound: set[str] = set()
+    # 곧바로 호출되는 속성 노드 (별칭 여부 판단용)
+    called_attrs = {
+        n.func for n in ast.walk(tree)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+    }
     for node in ast.walk(tree):
-        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Lambda):
+        if isinstance(node, ast.Assign):
+            is_func = isinstance(node.value, ast.Lambda)
             for t in node.targets:
                 if isinstance(t, ast.Name):
-                    func_names.add(t.id)
+                    (func_names if is_func else rebound).add(t.id)
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
             assigned.add(node.id)
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -273,6 +283,9 @@ def check_code(code: str, extra_attrs: set[str] | None = None) -> str | None:
                     assigned.add(t.id)
         elif isinstance(node, ast.ExceptHandler) and node.name:
             assigned.add(node.name)
+
+    # 함수로 바인딩됐더라도 다른 값으로 덮인 적이 있으면 신뢰하지 않는다.
+    func_names -= rebound
 
     for node in ast.walk(tree):
         # 0) 디스패처에 넘어가는 문자열 검사.
@@ -294,6 +307,14 @@ def check_code(code: str, extra_attrs: set[str] | None = None) -> str | None:
         if isinstance(node, ast.Attribute):
             if node.attr.startswith("_"):
                 return f"내부 속성 접근 금지: .{node.attr}"
+            # 디스패처는 곧바로 호출될 때만 허용한다. 변수에 담아 두면
+            # 호출부가 Attribute 가 아니게 되어 인자 검사를 빠져나간다.
+            #     a = df.map;  a(...)   <- 이 형태를 막는다
+            if node.attr in _DISPATCH_METHODS and node not in called_attrs:
+                return (
+                    f".{node.attr} 는 변수에 담을 수 없습니다 "
+                    "(바로 호출하는 형태로만 쓸 수 있습니다)"
+                )
             if node.attr not in allowed_attrs:
                 return (
                     f"허용되지 않은 속성: .{node.attr} "

@@ -205,10 +205,10 @@ LANGSMITH_ENDPOINT = "https://api.smith.langchain.com"
 ```bash
 python -m tests.test_routes    # 분기 함수 22건
 python -m tests.test_graph     # 그래프 구조 4건 (노드 수·조건부 엣지 수)
-python -m tests.test_sandbox   # 코드 실행 샌드박스 86건
+python -m tests.test_sandbox   # 코드 실행 샌드박스 91건
 ```
 
-**총 112건 전부 통과.** 그 밖에 구현 중 확인한 사항:
+**총 117건 전부 통과.** 그 밖에 구현 중 확인한 사항:
 
 - 6개 라우팅 경로를 실제 LLM 호출로 종단 확인
 - CE3 자기치유 루프 — 잘못된 열 이름으로 실패시킨 뒤 재시도가 오류를 읽고 코드를 고쳐 복구하는 것을 확인
@@ -270,8 +270,8 @@ np.ctypeslib.load_library(...)                     # ctypes 로더 (Linux 에서
 차트 저장은 LLM 코드를 먼저 검사한 뒤 **앱이 저장 경로를 통제해** 덧붙입니다.
 파일명은 호출마다 `plot_<uuid>.png` 로 달라집니다.
 
-검증: `python -m tests.test_sandbox` — 공격 **65종 전부 차단**, 정상 분석 코드 **21종 전부 통과**.
-실제 앱으로 12개 질문을 돌려 **오차단 0건**을 확인했습니다.
+검증: `python -m tests.test_sandbox` — 공격 **68종 전부 차단**, 정상 분석 코드 **23종 전부 통과**.
+실제 앱으로 14개 질문을 돌려 **실패 0건**을 확인했습니다.
 
 ### 남는 한계
 

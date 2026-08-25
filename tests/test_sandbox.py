@@ -108,6 +108,12 @@ MUST_BLOCK = [
     ("★ apply kwargs 경로",  "df['tenant'].apply('to_csv', path_or_buf='/tmp/pwn12.csv')"),
     ("★ apply args 튜플",    "df['tenant'].apply('to_pickle', args=('/tmp/pwn13.pkl',))"),
     ("★ apply 별칭",         "a = df['tenant'].apply\na('to_json', args=('/tmp/pwn14.json',))"),
+    # 디스패처를 변수에 담으면 호출부가 Attribute 가 아니라 인자 검사를 빠져나간다.
+    # 그래서 디스패처 속성은 '바로 호출' 형태로만 쓸 수 있게 했다.
+    ("★ map 별칭",           "a = df['tenant'].map\nprint(a(str).head(1))"),
+    ("★ pipe 별칭",          "p = df.pipe\nprint(p(len))"),
+    # 함수로 바인딩된 이름도 나중에 문자열로 덮이면 신뢰하지 않는다.
+    ("★ map 함수 재바인딩",     "f = lambda x: x\nf = 'to_csv'\nprint(df['tenant'].map(f).head(1))"),
 ]
 
 # 반드시 동작해야 하는 정상 분석 코드
@@ -134,6 +140,8 @@ MUST_PASS = [
     ("map 함수 전달",    "def f(x):\n    return round(x, 1)\nprint(df['detector_score'].map(f).head(1))"),
     ("map lambda 변수",  "g = lambda x: round(x, 2)\nprint(df['detector_score'].map(g).head(1))"),
     ("pipe(len)",     "print(df.pipe(len))"),
+    ("차단률 idiom",    "print((df['action'] == 'blocked').groupby(df['tenant']).mean())"),
+    ("concat 다중통계",  "g = df.groupby('tenant')['latency_ms']\nprint(pd.concat([g.mean(), g.max()], axis=1))"),
 ]
 
 

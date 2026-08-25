@@ -103,6 +103,11 @@ MUST_BLOCK = [
     ("★ def 후 재바인딩",     "def f(x):\n    return x\nf = 'to_csv'\ndf.agg(f, 0, '/tmp/pwn9.csv')"),
     ("★ transform 별칭",    "t = df.transform\nt('to_csv', 0, '/tmp/pwn10.csv')"),
     ("★ aggregate 직접",    "df.aggregate('to_csv', 0, '/tmp/pwn11.csv')"),
+    # Series.apply 도 문자열을 메서드로 해석해 파일을 쓴다.
+    # 처음 실측할 때 시그니처를 잘못 써서 안전해 보였던 경로다.
+    ("★ apply kwargs 경로",  "df['tenant'].apply('to_csv', path_or_buf='/tmp/pwn12.csv')"),
+    ("★ apply args 튜플",    "df['tenant'].apply('to_pickle', args=('/tmp/pwn13.pkl',))"),
+    ("★ apply 별칭",         "a = df['tenant'].apply\na('to_json', args=('/tmp/pwn14.json',))"),
 ]
 
 # 반드시 동작해야 하는 정상 분석 코드
@@ -116,7 +121,7 @@ MUST_PASS = [
     ("numpy 통계",     "print(np.mean(df['latency_ms']))"),
     ("pivot_table",   "print(df.pivot_table(index='tenant', values='latency_ms', aggfunc='mean'))"),
     ("for 루프",       "for t in sorted(df.tenant.unique()):\n    print(t, (df.tenant == t).sum())"),
-    ("apply/lambda",  "print(df['detector_score'].apply(lambda x: round(x, 1)).value_counts().head(2))"),
+    ("map/lambda",    "print(df['detector_score'].map(lambda x: round(x, 1)).value_counts().head(2))"),
     ("describe",      "print(df['detector_score'].describe())"),
     ("f-string 라벨",   "t = 'a'\nprint(f'{t}: {(df.tenant == t).sum()}건')"),
     ("문자열 연결 퍼센트",  "print('차단률: ' + str(round(df.action.eq('blocked').mean() * 100, 1)) + '%')"),
@@ -126,8 +131,8 @@ MUST_PASS = [
     ("다중통계 묶기",    "g = df.groupby('tenant')['latency_ms']\nprint(pd.DataFrame({'mean': g.mean(), 'max': g.max()}))"),
     ("ndarray 출력",  "print(np.array([1, 2, 3]))"),
     ("pivot_table",   "print(df.pivot_table(index='tenant', values='latency_ms', aggfunc='mean'))"),
-    ("def 함수 전달",    "def f(s):\n    return s.mean()\nprint(df.groupby('tenant')['latency_ms'].apply(f))"),
-    ("lambda 변수 전달",  "g = lambda s: s.max()\nprint(df.groupby('tenant')['latency_ms'].apply(g))"),
+    ("map 함수 전달",    "def f(x):\n    return round(x, 1)\nprint(df['detector_score'].map(f).head(1))"),
+    ("map lambda 변수",  "g = lambda x: round(x, 2)\nprint(df['detector_score'].map(g).head(1))"),
     ("pipe(len)",     "print(df.pipe(len))"),
 ]
 

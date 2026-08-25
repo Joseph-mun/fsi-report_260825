@@ -205,10 +205,10 @@ LANGSMITH_ENDPOINT = "https://api.smith.langchain.com"
 ```bash
 python -m tests.test_routes    # 분기 함수 22건
 python -m tests.test_graph     # 그래프 구조 4건 (노드 수·조건부 엣지 수)
-python -m tests.test_sandbox   # 코드 실행 샌드박스 83건
+python -m tests.test_sandbox   # 코드 실행 샌드박스 86건
 ```
 
-**총 109건 전부 통과.** 그 밖에 구현 중 확인한 사항:
+**총 112건 전부 통과.** 그 밖에 구현 중 확인한 사항:
 
 - 6개 라우팅 경로를 실제 LLM 호출로 종단 확인
 - CE3 자기치유 루프 — 잘못된 열 이름으로 실패시킨 뒤 재시도가 오류를 읽고 코드를 고쳐 복구하는 것을 확인
@@ -247,7 +247,7 @@ np.ctypeslib.load_library(...)                     # ctypes 로더 (Linux 에서
 - **속성 허용 목록** — 명시적으로 허용한 이름만 통과. `lib`, `npyio`, `DataSource`,
   `canvas`, `print_png`, `ctypeslib` 는 목록에 없으므로 자동 거부됩니다.
   새 하위 모듈이 생겨도 기본이 거부라 시간이 지나도 안전합니다.
-- **문자열 디스패처 제거** — pandas 의 `agg`/`aggregate`/`transform` 은 문자열을
+- **문자열 디스패처 제거** — pandas 의 `agg`/`aggregate`/`transform`/`apply` 는 문자열을
   메서드 이름으로 해석해 호출합니다. 문자열은 구문 트리에서 그냥 상수라
   속성 검사에 걸리지 않아, `df.agg('to_csv', 0, '/tmp/x')` 로 거부한 메서드가
   되살아나 **파일이 실제로 쓰였습니다**(예외가 나도 쓰기는 이미 끝난 뒤).
@@ -258,15 +258,19 @@ np.ctypeslib.load_library(...)                     # ctypes 로더 (Linux 에서
   f = lambda x: x;  f = 'to_csv';  df.agg(f)  # 재바인딩 — 검사가 흐름을 못 본다
   m = 'to_csv';  df.agg(m, ...)               # 변수 — 값을 정적으로 알 수 없다
   ```
-  그래서 가드를 포기하고 **이 세 메서드를 허용 목록에서 아예 뺐습니다.**
+  그래서 가드를 포기하고 **이 네 메서드를 허용 목록에서 아예 뺐습니다.**
+  (`df['x'].apply('to_csv', args=('/tmp/x',))` 도 파일을 썼습니다 —
+  처음 실측할 때 시그니처를 잘못 써서 안전해 보였던 경로입니다.)
   속성 자체에 닿을 수 없으니 별칭도 재바인딩도 성립하지 않습니다.
   분석 기능은 `groupby().mean()`, `.describe()`, `pd.concat([...], axis=1)`,
-  `pivot_table(aggfunc=...)` 로 대체하도록 프롬프트에 안내했습니다.
+  `pivot_table(aggfunc=...)`, 원소별 변환은 `.map(lambda ...)` 로 대체하도록
+  프롬프트에 안내했습니다. 남은 `map`/`pipe` 는 콜러블만 받아
+  문자열을 넘기면 `TypeError` 로 끝납니다(실측 확인).
 
 차트 저장은 LLM 코드를 먼저 검사한 뒤 **앱이 저장 경로를 통제해** 덧붙입니다.
 파일명은 호출마다 `plot_<uuid>.png` 로 달라집니다.
 
-검증: `python -m tests.test_sandbox` — 공격 **62종 전부 차단**, 정상 분석 코드 **21종 전부 통과**.
+검증: `python -m tests.test_sandbox` — 공격 **65종 전부 차단**, 정상 분석 코드 **21종 전부 통과**.
 실제 앱으로 12개 질문을 돌려 **오차단 0건**을 확인했습니다.
 
 ### 남는 한계

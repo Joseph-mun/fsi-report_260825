@@ -72,7 +72,7 @@ _PANDAS_ATTRS = {
     "dtypes", "T", "empty", "name", "isin", "where", "mask", "filter",
     "head", "tail", "sample", "nlargest", "nsmallest", "first", "last",
     # 집계 · 통계
-    "groupby", "apply", "map", "pipe",
+    "groupby", "map", "pipe",
     "sum", "mean", "median", "min", "max", "std", "var", "count", "size",
     "nunique", "unique", "value_counts", "describe", "quantile", "mode",
     "cumsum", "cumcount", "rank", "corr", "cov", "sem", "prod",
@@ -121,7 +121,7 @@ _MATPLOTLIB_ATTRS = {
     "kind", "ax", "figsize", "rot", "color", "alpha", "label", "stacked",
 }
 
-# pandas 의 agg / aggregate / transform 은 **문자열을 메서드 이름으로 해석**해
+# pandas 의 agg / aggregate / transform / apply 는 **문자열을 메서드 이름으로 해석**해
 # 호출합니다. 문자열은 구문 트리에서 그냥 상수라 속성 검사에 잡히지 않으므로,
 #   df.agg('to_csv', 0, '/tmp/x')
 # 로 거부한 메서드가 되살아나 파일이 실제로 쓰였습니다.
@@ -130,12 +130,15 @@ _MATPLOTLIB_ATTRS = {
 #   a = df.agg;  a('to_csv', ...)              # 별칭 — 호출부가 Attribute 가 아니다
 #   f = lambda x: x;  f = 'to_csv';  df.agg(f) # 재바인딩 — 검사가 흐름을 못 본다
 #
-# 그래서 가드를 덧대는 대신 **이 셋을 허용 목록에서 아예 뺐습니다.**
+# 그래서 가드를 덧대는 대신 **이 넷을 허용 목록에서 아예 뺐습니다.**
 # 속성 자체에 닿을 수 없으니 별칭도 재바인딩도 성립하지 않습니다.
 #
-# 아래 검사는 남은 apply/pipe/map/applymap 에 대한 이중 방어입니다.
-# (실측 결과 이들은 문자열을 임의 메서드로 디스패치하지 않습니다)
-_DISPATCH_METHODS = {"apply", "pipe", "map", "applymap"}
+#   df['x'].apply('to_csv', args=('/tmp/x',))   # 이것도 파일을 썼다
+#
+# 남은 pipe / map 은 콜러블만 받습니다. 문자열을 넘기면
+# "TypeError: 'str' object is not callable" 로 끝나고 아무 일도 일어나지 않습니다.
+# 아래 검사는 그 둘에 대한 이중 방어입니다.
+_DISPATCH_METHODS = {"pipe", "map"}
 
 # 디스패처에 문자열로 넘길 수 있는 이름 (집계 함수만).
 _ALLOWED_DISPATCH_NAMES = {

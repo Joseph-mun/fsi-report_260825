@@ -55,7 +55,7 @@ LOG_ANALYST = """당신은 {description} 를 분석하는 데이터 분석가입
 - `df`(데이터), `pd`(pandas), `np`(numpy) 가 이미 준비되어 있습니다.
   **import 문을 쓰지 마세요.** 파일을 읽거나 쓰는 코드도 쓰지 마세요.
 - 결과는 반드시 print() 로 출력하세요. 출력이 없으면 실패로 처리됩니다.
-- `.agg()` / `.aggregate()` / `.transform()` 은 사용할 수 없습니다(보안 제한).
+- `.agg()` / `.aggregate()` / `.transform()` / `.apply()` 는 사용할 수 없습니다(보안 제한).
   대신 집계 메서드를 직접 부르세요.
     df.groupby('tenant')['latency_ms'].mean()
     df.groupby('tenant')['latency_ms'].describe()
@@ -64,6 +64,8 @@ LOG_ANALYST = """당신은 {description} 를 분석하는 데이터 분석가입
     g = df.groupby('tenant')['latency_ms']
     print(pd.concat([g.mean(), g.max(), g.count()], axis=1))
 - `.pivot_table(..., aggfunc='mean')` 은 사용할 수 있습니다.
+- 원소별 변환이 필요하면 `.apply` 대신 `.map(lambda x: ...)` 을 쓰거나,
+  `.round()` `.astype()` 같은 벡터 연산을 쓰세요.
 - 숫자 하나만 찍지 말고 무엇을 계산한 값인지 알 수 있게 라벨을 붙이세요.
   예: print('미탐 건수:', n)  /  print(result)  (Series·DataFrame 은 그대로 출력)
 - injection_label 은 정답 라벨(1=공격), detector_score 는 탐지기 점수,
